@@ -5,7 +5,8 @@ import re
 # === НАСТРОЙКИ ===
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
-EPG_URL = "https://epg.ottclub.ru/epg.xml.gz"
+# Надежный и стабильный источник EPG для русскоязычных каналов
+EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -32,46 +33,39 @@ def get_channel_name(extinf_line):
     return match.group(1).strip() if match else "Unknown"
 
 def normalize_category(name, existing_group=""):
-    """Анализирует имя канала и существующую группу, возвращая стандартизированную категорию"""
-    text_to_check = (name + " " + existing_group).lower()
+    """Анализирует имя канала и возвращает строго стандартизированную категорию"""
+    text = (name + " " + existing_group).lower()
     
-    if any(word in text_to_check for word in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'a1', 'a2', 'indigo']):
-        return "🎬 Кино и Сериалы"
-    elif any(word in text_to_check for word in ['спорт', 'sport', 'матч', 'match', 'футбол', 'бокс', 'кхл', 'ufc', 'боец']):
-        return "⚽ Спорт"
-    elif any(word in text_to_check for word in ['новости', 'news', '24', 'дождь', 'звезда', 'мир', 'vesti']):
-        return "📰 Новости"
-    elif any(word in text_to_check for word in ['детский', 'kids', 'карусель', 'мульт', 'nickelodeon', 'disney', 'gulli', 'tiiji']):
-        return "🧸 Детские"
-    elif any(word in text_to_check for word in ['музыка', 'music', 'mtv', 'мюзик', 'bridge', 'ru.tv', 'телекафе']):
-        return "🎵 Музыка"
-    elif any(word in text_to_check for word in ['познавательный', 'doc', 'discovery', 'national', 'история', 'наука', 'travel', 'охота', 'рыбалка', 'загородный']):
-        return "🌍 Познавательные"
-    elif any(word in text_to_check for word in ['религия', 'religion', 'спас', 'союз', 'вера']):
-        return "🙏 Религиозные"
-    elif any(word in text_to_check for word in ['регион', 'спб', 'spb', 'кубань', 'катод', 'tv21', 'архыз', 'ямал']):
-        return "🏛 Региональные"
-    elif any(word in text_to_check for word in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'рен', 'тв3', 'пятница', 'че', 'домашний', 'звезда', 'общественное']):
-        return "📺 Федеральные и Общие"
-    else:
-        return "📦 Разное"
+    if any(w in text for w in ['4k', '2160p', 'ultra hd', 'uhd']): return "📺 4K / Ultra HD"
+    elif any(w in text for w in ['авто', 'auto', 'мото', 'за рулем']): return "🚗 Авто и Мото"
+    elif any(w in text for w in ['кухня', 'еда', 'food', 'кулинар', 'рецепт']): return "🍳 Еда и Кулинария"
+    elif any(w in text for w in ['шопинг', 'магазин', 'tv shop', 'покупки', 'shopping']): return "🛍 Шопинг"
+    elif any(w in text for w in ['охота', 'рыбалка', 'загородный', 'дача', 'усадьба', 'хобби']): return "🌿 Природа и Хобби"
+    elif any(w in text for w in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'indigo', 'кинокомедия']): return "🎬 Кино и Сериалы"
+    elif any(w in text for w in ['спорт', 'sport', 'матч', 'match', 'футбол', 'бокс', 'кхл', 'ufc', 'боец', 'extreme']): return "⚽ Спорт"
+    elif any(w in text for w in ['новости', 'news', '24', 'дождь', 'звезда', 'мир', 'vesti', 'euronews']): return "📰 Новости"
+    elif any(w in text for w in ['детский', 'kids', 'карусель', 'мульт', 'nickelodeon', 'disney', 'gulli', 'tiiji', 'мультимузыка']): return "🧸 Детские"
+    elif any(w in text for w in ['музыка', 'music', 'mtv', 'мюзик', 'bridge', 'ru.tv', 'телекафе', 'viva']): return "🎵 Музыка"
+    elif any(w in text for w in ['юмор', 'comedy', 'индия', 'развлечен', 'entertainment', 'тнт4', 'суббота']): return "😂 Юмор и Развлечения"
+    elif any(w in text for w in ['познавательный', 'doc', 'discovery', 'national', 'история', 'наука', 'travel', 'viasat']): return "🌍 Познавательные"
+    elif any(w in text for w in ['религия', 'religion', 'спас', 'союз', 'вера', 'будем']): return "🙏 Религиозные"
+    elif any(w in text for w in ['регион', 'спб', 'spb', 'кубань', 'катод', 'tv21', 'архыз', 'ямал', 'брянск', 'тула', 'самара']): return "🏛 Региональные"
+    elif any(w in text for w in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'рен', 'тв3', 'пятница', 'че', 'домашний', 'звезда', 'общественное', 'отр']): return "📺 Федеральные и Общие"
+    else: return "📦 Разное"
 
 def fix_extinf(extinf_line, channel_name):
     """Гарантирует наличие tvg-id, tvg-name и ПРАВИЛЬНОГО group-title"""
     safe_id = re.sub(r'[^a-zа-я0-9]', '', channel_name.lower())
     
-    # Извлекаем текущую группу, если она есть
     group_match = re.search(r'group-title="([^"]*)"', extinf_line)
     current_group = group_match.group(1) if group_match else ""
-    
-    # Определяем новую, чистую категорию
     new_category = normalize_category(channel_name, current_group)
     
-    # 1. Чиним tvg-id
+    # 1. Чиним tvg-id (если его нет)
     if 'tvg-id=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
         
-    # 2. Чиним tvg-name
+    # 2. Чиним tvg-name (если его нет)
     if 'tvg-name=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
         
@@ -79,9 +73,7 @@ def fix_extinf(extinf_line, channel_name):
     if group_match:
         extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{new_category}"', extinf_line)
     else:
-        # Если group-title не было, добавляем его после #EXTINF:
         extinf_line = re.sub(r'(#EXTINF:[^,]*,)', f'\\1 group-title="{new_category}" ', extinf_line)
-        # Если и это не сработало (кривой формат), просто добавляем в начало
         if 'group-title=' not in extinf_line:
             extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: group-title="{new_category}" ', 1)
             
@@ -89,8 +81,7 @@ def fix_extinf(extinf_line, channel_name):
 
 def get_existing_urls():
     urls = set()
-    if not os.path.exists(SOURCES_FILE):
-        return urls
+    if not os.path.exists(SOURCES_FILE): return urls
     with open(SOURCES_FILE, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -102,10 +93,7 @@ def find_github_playlists():
     print("🔍 Поиск новых русских источников на GitHub...")
     new_urls = set()
     search_url = "https://api.github.com/search/repositories"
-    params = {
-        "q": "iptv russian OR iptv ru OR iptv россия in:name,description,topics",
-        "sort": "stars", "order": "desc", "per_page": 20 
-    }
+    params = {"q": "iptv russian OR iptv ru OR iptv россия in:name,description,topics", "sort": "stars", "order": "desc", "per_page": 20}
     try:
         resp = requests.get(search_url, headers=HEADERS, params=params, timeout=15)
         resp.raise_for_status()
@@ -115,8 +103,7 @@ def find_github_playlists():
         return new_urls
 
     for repo in repos:
-        if repo.get("fork", False) or repo.get("stargazers_count", 0) < 5:
-            continue
+        if repo.get("fork", False) or repo.get("stargazers_count", 0) < 5: continue
         repo_name = repo["full_name"]
         default_branch = repo.get("default_branch", "main")
         tree_url = f"https://api.github.com/repos/{repo_name}/git/trees/{default_branch}?recursive=1"
@@ -207,6 +194,10 @@ def parse_m3u(url, filter_russian=False):
     print(f"   ✅ Найдено каналов: {len(channels)}")
     return channels
 
+def get_category_for_sort(extinf_line):
+    match = re.search(r'group-title="([^"]*)"', extinf_line)
+    return match.group(1) if match else "📦 Разное"
+
 def main():
     gh_urls = find_github_playlists()
     update_sources_file(gh_urls)
@@ -220,6 +211,7 @@ def main():
         channels = parse_m3u(src["url"], filter_russian=src["filter_russian"])
         all_channels.extend(channels)
     print(f"\n📊 Всего каналов до обработки: {len(all_channels)}")
+    
     seen_urls = set()
     unique_channels = []
     for ch in all_channels:
@@ -228,22 +220,18 @@ def main():
             seen_urls.add(norm_url)
             unique_channels.append(ch)
     
-    # Сортировка сначала по категории, потом по имени канала
-    unique_channels.sort(key=lambda x: (get_normalized_category_for_sort(x['extinf']), get_channel_name(x['extinf']).lower()))
+    # Сортировка: сначала по категории, потом по имени канала
+    unique_channels.sort(key=lambda x: (get_category_for_sort(x['extinf']), get_channel_name(x['extinf']).lower()))
     
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(f'#EXTM3U url-tvg="{EPG_URL}"\n')
         for ch in unique_channels:
             f.write(f"{ch['extinf']}\n")
             f.write(f"{ch['url']}\n")
+            
     removed_count = len(all_channels) - len(unique_channels)
     print(f"\n✅ Успешно сохранено {len(unique_channels)} уникальных каналов в {OUTPUT_FILE}")
     print(f"🗑 Удалено дубликатов (по URL): {removed_count}")
-
-def get_normalized_category_for_sort(extinf_line):
-    """Вспомогательная функция для сортировки по категориям"""
-    match = re.search(r'group-title="([^"]*)"', extinf_line)
-    return match.group(1) if match else "📦 Разное"
 
 if __name__ == "__main__":
     main()
