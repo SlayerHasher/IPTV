@@ -1,0 +1,8 @@
+# Это список источников IPTV. 
+# Строки, начинающиеся с #, игнорируются скриптом.
+
+# --- ВАШИ РУЧНЫЕ ИСТОЧНИКИ ---
+https://iptv-org.github.io/iptv/languages/rus.m3u
+https://iptv-org.github.io/iptv/countries/ru.m3u
+
+# --- AUTO SOURCES (GitHub Search) ---
