@@ -15,7 +15,6 @@ def normalize_url(url):
 
 def normalize_channel_name(name):
     """Приводит название канала к нормализованному виду для сравнения"""
-    # Убираем пробелы, спецсимволы, приводим к нижнему регистру
     name = name.lower().strip()
     name = re.sub(r'[^a-zа-я0-9]', '', name)
     return name
@@ -42,22 +41,81 @@ def normalize_category(name, existing_group=""):
     """Анализирует имя канала и возвращает строго стандартизированную категорию"""
     text = (name + " " + existing_group).lower()
     
-    if any(w in text for w in ['4k', '2160p', 'ultra hd', 'uhd']): return "📺 4K / Ultra HD"
-    elif any(w in text for w in ['авто', 'auto', 'мото', 'за рулем']): return "🚗 Авто и Мото"
-    elif any(w in text for w in ['кухня', 'еда', 'food', 'кулинар', 'рецепт']): return "🍳 Еда и Кулинария"
-    elif any(w in text for w in ['шопинг', 'магазин', 'tv shop', 'покупки', 'shopping']): return "🛍 Шопинг"
-    elif any(w in text for w in ['охота', 'рыбалка', 'загородный', 'дача', 'усадьба', 'хобби']): return "🌿 Природа и Хобби"
-    elif any(w in text for w in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'indigo', 'кинокомедия']): return " Кино и Сериалы"
-    elif any(w in text for w in ['спорт', 'sport', 'матч', 'match', 'футбол', 'бокс', 'кхл', 'ufc', 'боец', 'extreme']): return "⚽ Спорт"
-    elif any(w in text for w in ['новости', 'news', '24', 'дождь', 'звезда', 'мир', 'vesti', 'euronews']): return "📰 Новости"
-    elif any(w in text for w in ['детский', 'kids', 'карусель', 'мульт', 'nickelodeon', 'disney', 'gulli', 'tiiji', 'мультимузыка']): return "🧸 Детские"
-    elif any(w in text for w in ['музыка', 'music', 'mtv', 'мюзик', 'bridge', 'ru.tv', 'телекафе', 'viva']): return "🎵 Музыка"
-    elif any(w in text for w in ['юмор', 'comedy', 'индия', 'развлечен', 'entertainment', 'тнт4', 'суббота']): return "😂 Юмор и Развлечения"
-    elif any(w in text for w in ['познавательный', 'doc', 'discovery', 'national', 'история', 'наука', 'travel', 'viasat']): return "🌍 Познавательные"
-    elif any(w in text for w in ['религия', 'religion', 'спас', 'союз', 'вера', 'будем']): return "🙏 Религиозные"
-    elif any(w in text for w in ['регион', 'спб', 'spb', 'кубань', 'катод', 'tv21', 'архыз', 'ямал', 'брянск', 'тула', 'самара']): return "🏛 Региональные"
-    elif any(w in text for w in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'рен', 'тв3', 'пятница', 'че', 'домашний', 'звезда', 'общественное', 'отр']): return "📺 Федеральные и Общие"
-    else: return "📦 Разное"
+    # Приоритетные категории (проверяем в первую очередь)
+    if any(w in text for w in ['4k', '2160p', 'ultra hd', 'uhd']): 
+        return " 4K / Ultra HD"
+    
+    # Авто и Мото
+    elif any(w in text for w in ['авто', 'auto', 'мото', 'за рулем', 'drive', 'cityeden автогид']): 
+        return " Авто и Мото"
+    
+    # Еда и Кулинария
+    elif any(w in text for w in ['кухня', 'еда', 'food', 'кулинар', 'рецепт', 'город рецептов', 'cityeden рецепты']): 
+        return "🍳 Еда и Кулинария"
+    
+    # Шопинг / Магазины на диване
+    elif any(w in text for w in ['шопинг', 'магазин', 'tv shop', 'покупки', 'shopping', 'ювелирочка', 'jewel']): 
+        return "🛍 Шопинг"
+    
+    # Кино и Сериалы (до спорта и новостей, так как более специфично)
+    elif any(w in text for w in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'indigo', 'кинокомедия', 'cinema', 'ammedia', 'blokbaster', 'evrokino', 'horoshee', 'indiyskoe', 'russkiy', 'russian', 'dom kino', 'hit hd', 'hollywood', 'kinohit', 'kinotv', 'kinokomedija']): 
+        return "🎬 Кино и Сериалы"
+    
+    # Спорт
+    elif any(w in text for w in ['спорт', 'sport', 'матч', 'match', 'футбол', 'бокс', 'кхл', 'ufc', 'боец', 'extreme', 'start triumf']): 
+        return "⚽ Спорт"
+    
+    # Новости
+    elif any(w in text for w in ['новости', 'news', '24', 'дождь', 'звезда', 'мир', 'vesti', 'euronews', 'cgtn', 'tolk', 'pervyy respublikanskiy']): 
+        return "📰 Новости"
+    
+    # Детские
+    elif any(w in text for w in ['детский', 'kids', 'карусель', 'мульт', 'nickelodeon', 'disney', 'gulli', 'tiiji', 'мультимузыка', 'ani', 'baby', 'chizhik', 'detskiy', 'kapitan', 'kidzone', 'tamyr', 'balastan', 'unikum']): 
+        return "🧸 Детские"
+    
+    # Музыка
+    elif any(w in text for w in ['музыка', 'music', 'mtv', 'мюзик', 'bridge', 'ru.tv', 'телекафе', 'viva', '15+', 'bridge', 'classic music', 'dtr music', 'europa plus', 'hit fm', 'o2тв', 'radio', 'shanson', 'strana fm', 'country', 'dancehits', 'first music', 'cityeden']): 
+        return " Музыка"
+    
+    # Юмор и Развлечения
+    elif any(w in text for w in ['юмор', 'comedy', 'индия', 'развлечен', 'entertainment', 'тнт4', 'суббота', 'gagsnetwork', 'kinokomedija', 'tvoye tv']): 
+        return "😂 Юмор и Развлечения"
+    
+    # Познавательные / Документальные
+    elif any(w in text for w in ['познавательный', 'doc', 'discovery', 'national', 'история', 'наука', 'travel', 'viasat', '365 days', 'da vinci', 'english class']): 
+        return "🌍 Познавательные"
+    
+    # Природа / Охота / Рыбалка / Дача / Усадьба
+    elif any(w in text for w in ['охота', 'рыбалка', 'загородный', 'дача', 'усадьба', 'хобби', 'dikaya', 'outdoor', 'poehali', 'glazami turista', 'teleputeshestviya', 'dacha']): 
+        return "🌿 Природа, Охота, Рыбалка и Дача"
+    
+    # Религиозные
+    elif any(w in text for w in ['религия', 'religion', 'спас', 'союз', 'вера', 'будем', 'angel tv', '3abn', 'cityeden христианский', 'huzur']): 
+        return "🙏 Религиозные"
+    
+    # Здоровье / Медицина
+    elif any(w in text for w in ['здоров', 'health', 'tonus', 'tonic', 'med', 'медицина', 'cityeden медздрав', 'открытый мир здоровье']): 
+        return "💊 Здоровье и Медицина"
+    
+    # Транспорт
+    elif any(w in text for w in ['ржд', 'rzd', 'transport', 'транспорт', 'rzd tv']): 
+        return "🚂 Транспорт"
+    
+    # Патриотические / Исторические
+    elif any(w in text for w in ['побед', 'pobedy', 'den pobedy', 'неизвестная россия', 'unknown russia', 'патриот', 'patriot']): 
+        return "🎖 Патриотические и Исторические"
+    
+    # Региональные (проверяем после всех специфичных категорий)
+    elif any(w in text for w in ['спб', 'spb', 'санкт-петербург', 'своё', 'svoe', 'ставрополь', 'сургут', 'surgut', 'самара', 'samara', 'рязань', 'ryazan', 'астрахань', 'astrakhan', 'нарьян-мар', 'sever', 'naryan', 'щелково', 'shchyolkovo', 'татарстан', 'tatarstan', 'шаян', 'shayan', 'крым', 'crimea', 'севастополь', 'sevastopol', 'осетия', 'osetia', 'ирывстон', 'ярославль', 'yaroslavl', 'нижний новгород', 'novgorod', 'тамбов', 'tambov', 'челябинск', 'chelyabinsk', 'хабаровск', 'khabarovsk', 'красноярск', 'krasnoyarsk', 'новосибирск', 'novosibirsk', 'биробиджан', 'birobidzhan', 'удмуртия', 'udmurtia', 'мордовия', 'mordovia', 'башкортостан', 'bashkortostan', 'ufa', 'уфа', 'пермь', 'perm', 'кубань', 'kuban', 'архыз', 'arkhyz', 'tv21', 'катод', 'катод', 'aqlvoy', 'jibek joly', 'channel 7 kazakhstan', 'eltr', 'ala-too', 'utrk', 'osh pirim', 'bala', 'balty', 'apsua', 'dasturxon', 'belarus', 'belros', 'balti', 'etv+', 'jibek']): 
+        return "🏛 Региональные каналы"
+    
+    # Федеральные и Общие (базовые каналы)
+    elif any(w in text for w in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'рен', 'тв3', 'пятница', 'че', 'домашний', 'звезда', 'общественное', 'отр', 'channel one', 'pervyy', 'russia', 'belarus', 'jibek joly', 'dasturxon', 'artn', 'groznyj', 'istoki', 'nikatv', 'novy vek', 'osn', 'tavriya', 'trk555', 'gribuvisuzinat', 'хожу всё знать']): 
+        return "📺 Федеральные и Общие"
+    
+    # Разное (всё остальное)
+    else: 
+        return "📦 Разное"
 
 def fix_extinf(extinf_line, channel_name):
     """Гарантирует наличие tvg-id, tvg-name и ПРАВИЛЬНОГО group-title"""
@@ -223,7 +281,6 @@ def main():
         name = get_channel_name(ch['extinf'])
         norm_name = normalize_channel_name(name)
         
-        # Если канал с таким именем еще не встречался, добавляем его
         if norm_name not in seen_names:
             seen_names.add(norm_name)
             unique_channels.append(ch)
@@ -239,7 +296,7 @@ def main():
             
     removed_count = len(all_channels) - len(unique_channels)
     print(f"\n✅ Успешно сохранено {len(unique_channels)} уникальных каналов в {OUTPUT_FILE}")
-    print(f" Удалено дубликатов (по имени): {removed_count}")
+    print(f"🗑 Удалено дубликатов (по имени): {removed_count}")
 
 if __name__ == "__main__":
     main()
