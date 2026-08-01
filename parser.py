@@ -5,7 +5,6 @@ import re
 # === НАСТРОЙКИ ===
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
-# Надежный и стабильный источник EPG для русскоязычных каналов
 EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -13,6 +12,13 @@ HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
 
 def normalize_url(url):
     return url.strip().lower().rstrip('/')
+
+def normalize_channel_name(name):
+    """Приводит название канала к нормализованному виду для сравнения"""
+    # Убираем пробелы, спецсимволы, приводим к нижнему регистру
+    name = name.lower().strip()
+    name = re.sub(r'[^a-zа-я0-9]', '', name)
+    return name
 
 def is_russian_channel(extinf_line):
     line_lower = extinf_line.lower()
@@ -41,7 +47,7 @@ def normalize_category(name, existing_group=""):
     elif any(w in text for w in ['кухня', 'еда', 'food', 'кулинар', 'рецепт']): return "🍳 Еда и Кулинария"
     elif any(w in text for w in ['шопинг', 'магазин', 'tv shop', 'покупки', 'shopping']): return "🛍 Шопинг"
     elif any(w in text for w in ['охота', 'рыбалка', 'загородный', 'дача', 'усадьба', 'хобби']): return "🌿 Природа и Хобби"
-    elif any(w in text for w in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'indigo', 'кинокомедия']): return "🎬 Кино и Сериалы"
+    elif any(w in text for w in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'indigo', 'кинокомедия']): return " Кино и Сериалы"
     elif any(w in text for w in ['спорт', 'sport', 'матч', 'match', 'футбол', 'бокс', 'кхл', 'ufc', 'боец', 'extreme']): return "⚽ Спорт"
     elif any(w in text for w in ['новости', 'news', '24', 'дождь', 'звезда', 'мир', 'vesti', 'euronews']): return "📰 Новости"
     elif any(w in text for w in ['детский', 'kids', 'карусель', 'мульт', 'nickelodeon', 'disney', 'gulli', 'tiiji', 'мультимузыка']): return "🧸 Детские"
@@ -61,15 +67,12 @@ def fix_extinf(extinf_line, channel_name):
     current_group = group_match.group(1) if group_match else ""
     new_category = normalize_category(channel_name, current_group)
     
-    # 1. Чиним tvg-id (если его нет)
     if 'tvg-id=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
         
-    # 2. Чиним tvg-name (если его нет)
     if 'tvg-name=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
         
-    # 3. Заменяем или добавляем group-title
     if group_match:
         extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{new_category}"', extinf_line)
     else:
@@ -212,14 +215,19 @@ def main():
         all_channels.extend(channels)
     print(f"\n📊 Всего каналов до обработки: {len(all_channels)}")
     
-    seen_urls = set()
+    # ДЕДУПЛИКАЦИЯ ПО ИМЕНИ КАНАЛА
+    seen_names = set()
     unique_channels = []
-    for ch in all_channels:
-        norm_url = normalize_url(ch['url'])
-        if norm_url not in seen_urls:
-            seen_urls.add(norm_url)
-            unique_channels.append(ch)
     
+    for ch in all_channels:
+        name = get_channel_name(ch['extinf'])
+        norm_name = normalize_channel_name(name)
+        
+        # Если канал с таким именем еще не встречался, добавляем его
+        if norm_name not in seen_names:
+            seen_names.add(norm_name)
+            unique_channels.append(ch)
+            
     # Сортировка: сначала по категории, потом по имени канала
     unique_channels.sort(key=lambda x: (get_category_for_sort(x['extinf']), get_channel_name(x['extinf']).lower()))
     
@@ -231,7 +239,7 @@ def main():
             
     removed_count = len(all_channels) - len(unique_channels)
     print(f"\n✅ Успешно сохранено {len(unique_channels)} уникальных каналов в {OUTPUT_FILE}")
-    print(f"🗑 Удалено дубликатов (по URL): {removed_count}")
+    print(f" Удалено дубликатов (по имени): {removed_count}")
 
 if __name__ == "__main__":
     main()
