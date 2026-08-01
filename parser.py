@@ -2,210 +2,220 @@ import requests
 import os
 import re
 import json
+import gzip
+import xml.etree.ElementTree as ET
+from io import BytesIO
 
-# === НАСТРОЙКИ ===
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
 EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
-CATEGORIES_FILE = "channel_categories.json"
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
 
-def normalize_url(url):
-    return url.strip().lower().rstrip('/')
+# Маппинг категорий из EPG в наши
+EPC_CATEGORY_MAP = {
+    'movies': '🎬 Кино и Сериалы',
+    'cinema': '🎬 Кино и Сериалы',
+    'film': '🎬 Кино и Сериалы',
+    'series': '🎬 Кино и Сериалы',
+    'entertainment': '📺 Федеральные и Общие',
+    'general': '📺 Федеральные и Общие',
+    'sports': '⚽ Спорт',
+    'sport': '⚽ Спорт',
+    'news': '📰 Новости',
+    'kids': '🧸 Детские',
+    'children': '🧸 Детские',
+    'music': '🎵 Музыка',
+    'documentary': '🌍 Познавательные',
+    'doc': '🌍 Познавательные',
+    'lifestyle': '🌿 Природа, Охота, Рыбалка и Дача',
+    'outdoor': '🌿 Природа, Охота, Рыбалка и Дача',
+    'religion': ' Религиозные',
+    'auto': '🚗 Авто и Мото',
+    'moto': '🚗 Авто и Мото',
+    'food': '🍳 Еда и Кулинария',
+    'cooking': '🍳 Еда и Кулинария',
+    'shopping': '🛍 Шопинг',
+    'travel': '🌍 Познавательные',
+    'science': '🌍 Познавательные',
+    'history': '🌍 Познавательные',
+    'nature': '🌿 Природа, Охота, Рыбалка и Дача',
+    'hunting': ' Природа, Охота, Рыбалка и Дача',
+    'fishing': ' Природа, Охота, Рыбалка и Дача',
+    'health': ' Здоровье и Медицина',
+    'medical': '💊 Здоровье и Медицина',
+    'business': '📰 Новости',
+    'finance': '📰 Новости',
+    'regional': '🏛 Региональные каналы',
+    'local': '🏛 Региональные каналы',
+}
+
+def load_epg_categories():
+    """Скачиваем EPG и извлекаем категории каналов"""
+    print("📥 Загрузка и парсинг EPG...")
+    categories = {}
+    
+    try:
+        response = requests.get(EPG_URL, timeout=60)
+        response.raise_for_status()
+        
+        with gzip.GzipFile(fileobj=BytesIO(response.content)) as gz:
+            xml_content = gz.read().decode('utf-8')
+        
+        root = ET.fromstring(xml_content)
+        
+        for channel in root.findall('.//channel'):
+            channel_id = channel.get('id', '').lower().strip()
+            
+            display_name = ""
+            category = ""
+            
+            name_elem = channel.find('display-name')
+            if name_elem is not None and name_elem.text:
+                display_name = name_elem.text.strip().lower()
+            
+            category_elem = channel.find('category')
+            if category_elem is not None and category_elem.text:
+                category = category_elem.text.strip().lower()
+            
+            if channel_id and category:
+                categories[channel_id] = category
+            if display_name and category:
+                categories[display_name] = category
+        
+        print(f"✅ Извлечено {len(categories)} каналов с категориями из EPG")
+        return categories
+        
+    except Exception as e:
+        print(f"❌ Ошибка загрузки EPG: {e}")
+        return {}
+
+def map_category(epg_category):
+    """Преобразуем категорию из EPG в наш формат"""
+    if not epg_category:
+        return None
+    
+    cat = epg_category.lower().strip()
+    
+    # Точное совпадение
+    if cat in EPC_CATEGORY_MAP:
+        return EPC_CATEGORY_MAP[cat]
+    
+    # Частичное совпадение
+    for key, value in EPC_CATEGORY_MAP.items():
+        if key in cat:
+            return value
+    
+    # Если не нашли - возвращаем оригинал
+    return cat.capitalize()
 
 def normalize_channel_name(name):
     name = name.lower().strip()
     name = re.sub(r'[^a-zа-я0-9]', '', name)
     return name
 
-def load_channel_database():
-    """Загружаем базу категорий каналов"""
-    try:
-        # Пробуем скачать свежую базу
-        url = "https://iptv-org.github.io/api/channels.json"
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        channel_db = {}
-        for channel in data:
-            name = channel.get('name', '').lower().strip()
-            category = channel.get('category', 'Undefined')
-            if name and category != 'Undefined':
-                channel_db[name] = category
-                
-        print(f" Загружена база: {len(channel_db)} каналов")
-        return channel_db
-    except Exception as e:
-        print(f"️  Не удалось загрузить базу: {e}")
-        return {}
-
 def is_russian_channel(extinf_line):
     line_lower = extinf_line.lower()
-    lang_match = re.search(r'tvg-language="([^"]*)"', line_lower)
-    if lang_match:
-        languages = [lang.strip() for lang in lang_match.group(1).split(';')]
-        if any(lang in ['russian', 'rus', 'ru'] for lang in languages):
-            return True
-    country_match = re.search(r'tvg-country="([^"]*)"', line_lower)
-    if country_match:
-        countries = [c.strip() for c in country_match.group(1).split(';')]
-        if any(c in ['ru', 'rus', 'by', 'kz', 'ua'] for c in countries):
-            return True
+    if re.search(r'tvg-language="[^"]*russian[^"]*"', line_lower):
+        return True
+    if re.search(r'tvg-country="[^"]*(ru|rus)[^"]*"', line_lower):
+        return True
     return False
 
 def get_channel_name(extinf_line):
     match = re.search(r',(.*?)$', extinf_line)
     return match.group(1).strip() if match else "Unknown"
 
-def get_original_category(extinf_line):
-    """Извлекаем оригинальную категорию из group-title"""
-    match = re.search(r'group-title="([^"]*)"', extinf_line)
-    return match.group(1).strip() if match else ""
+def get_tvg_id(extinf_line):
+    match = re.search(r'tvg-id="([^"]*)"', extinf_line)
+    return match.group(1).lower().strip() if match else ""
 
-def normalize_category_from_original(original_category):
-    """Преобразуем оригинальную категорию в наш формат"""
-    if not original_category or original_category.lower() in ['undefined', '']:
-        return None
-        
-    cat = original_category.lower()
+def get_category_from_epg(channel_name, tvg_id, epg_categories):
+    """Ищем категорию в EPG базе"""
     
-    # Маппинг английских и русских категорий
-    category_map = {
-        'movies': '🎬 Кино и Сериалы',
-        'cinema': '🎬 Кино и Сериалы',
-        'film': '🎬 Кино и Сериалы',
-        'кино': '🎬 Кино и Сериалы',
-        'сериалы': ' Кино и Сериалы',
-        'entertainment': '📺 Федеральные и Общие',
-        'general': ' Федеральные и Общие',
-        'общие': '📺 Федеральные и Общие',
-        'sports': '⚽ Спорт',
-        'sport': '⚽ Спорт',
-        'спорт': '⚽ Спорт',
-        'news': '📰 Новости',
-        'новости': '📰 Новости',
-        'kids': '🧸 Детские',
-        'children': '🧸 Детские',
-        'детские': ' Детские',
-        'music': ' Музыка',
-        'музыка': ' Музыка',
-        'documentary': ' Познавательные',
-        'doc': '🌍 Познавательные',
-        'познавательные': ' Познавательные',
-        'regional': '🏛 Региональные каналы',
-        'региональные': '🏛 Региональные каналы',
-        'lifestyle': '🌿 Природа, Охота, Рыбалка и Дача',
-        'outdoor': '🌿 Природа, Охота, Рыбалка и Дача',
-        'religion': '🙏 Религиозные',
-        'религиозные': ' Религиозные',
-    }
+    # 1. По tvg-id
+    if tvg_id and tvg_id in epg_categories:
+        return map_category(epg_categories[tvg_id])
     
-    for key, value in category_map.items():
-        if key in cat:
-            return value
+    # 2. По имени канала
+    name_lower = channel_name.lower().strip()
+    if name_lower in epg_categories:
+        return map_category(epg_categories[name_lower])
+    
+    # 3. Частичное совпадение (без HD, FHD и т.д.)
+    clean_name = re.sub(r'\s*(hd|fhd|sd|uhd|4k|2160|1080|720)\s*', '', name_lower).strip()
+    if clean_name in epg_categories:
+        return map_category(epg_categories[clean_name])
     
     return None
 
-def categorize_by_keywords(name):
-    """Категоризация по ключевым словам в названии"""
-    text = name.lower()
+def get_category_fallback(name):
+    """Только для каналов, которых нет в EPG"""
+    name_lower = name.lower()
     
-    if any(w in text for w in ['4k', '2160p', 'ultra hd', 'uhd']): 
-        return " 4K / Ultra HD"
-    elif any(w in text for w in ['авто', 'auto', 'мото', 'drive']): 
-        return "🚗 Авто и Мото"
-    elif any(w in text for w in ['кухня', 'еда', 'food', 'кулинар', 'рецепт']): 
-        return "🍳 Еда и Кулинария"
-    elif any(w in text for w in ['шопинг', 'магазин', 'tv shop', 'покупки']): 
-        return "🛍 Шопинг"
-    elif any(w in text for w in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000']): 
+    if any(x in name_lower for x in ['4k', '2160', 'uhd']):
+        return "📺 4K / Ultra HD"
+    if any(x in name_lower for x in ['кино', 'cinema', 'movie', 'film', 'премьера', 'premiere', 'tv1000']):
         return "🎬 Кино и Сериалы"
-    elif any(w in text for w in ['спорт', 'sport', 'матч', 'match', 'футбол', 'кхл']): 
+    if any(x in name_lower for x in ['спорт', 'sport', 'матч', 'match', 'футбол', 'хоккей']):
         return "⚽ Спорт"
-    elif any(w in text for w in ['новости', 'news', '24', 'дождь', 'vesti']): 
-        return " Новости"
-    elif any(w in text for w in ['детский', 'kids', 'карусель', 'мульт', 'disney']): 
+    if any(x in name_lower for x in ['новости', 'news', '24', 'дождь', 'vesti']):
+        return "📰 Новости"
+    if any(x in name_lower for x in ['детский', 'kids', 'карусель', 'мульт', 'disney']):
         return "🧸 Детские"
-    elif any(w in text for w in ['музыка', 'music', 'mtv', 'bridge']): 
-        return "🎵 Музыка"
-    elif any(w in text for w in ['юмор', 'comedy', 'развлечен']): 
-        return "😂 Юмор и Развлечения"
-    elif any(w in text for w in ['познавательный', 'discovery', 'national', 'история', 'наука']): 
-        return " Познавательные"
-    elif any(w in text for w in ['охота', 'рыбалка', 'дача', 'усадьба', 'загородный']): 
-        return " Природа, Охота, Рыбалка и Дача"
-    elif any(w in text for w in ['религия', 'спас', 'союз', 'вера']): 
-        return " Религиозные"
-    elif any(w in text for w in ['здоров', 'tonus', 'мед']): 
-        return "💊 Здоровье и Медицина"
-    elif any(w in text for w in ['ржд', 'rzd', 'транспорт']): 
+    if any(x in name_lower for x in ['музыка', 'music', 'mtv', 'муз', 'bridge']):
+        return " Музыка"
+    if any(x in name_lower for x in ['discovery', 'national', 'история', 'history', 'наука', 'travel']):
+        return "🌍 Познавательные"
+    if any(x in name_lower for x in ['охота', 'рыбалка', 'дача', 'усадьба']):
+        return "🌿 Природа, Охота, Рыбалка и Дача"
+    if any(x in name_lower for x in ['кухня', 'еда', 'food', 'кулинар']):
+        return " Еда и Кулинария"
+    if any(x in name_lower for x in ['авто', 'auto', 'мото']):
+        return " Авто и Мото"
+    if any(x in name_lower for x in ['ржд', 'транспорт']):
         return "🚂 Транспорт"
-    elif any(w in text for w in ['побед', 'патриот', 'исторический']): 
-        return " Патриотические и Исторические"
-    elif any(w in text for w in ['спб', 'spb', 'сургут', 'самара', 'кубань', 'регион', 'область', 'край']): 
+    if any(x in name_lower for x in ['спб', 'регион', 'область', 'кубань', 'сургут', 'самара']):
         return "🏛 Региональные каналы"
-    elif any(w in text for w in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'рен', 'тв3']): 
-        return "📺 Федеральные и Общие"
-    else:
-        return "📦 Разное"
-
-def get_best_category(channel_name, original_category, channel_db):
-    """
-    Получаем лучшую категорию используя все доступные источники:
-    1. Оригинальная категория из плейлиста
-    2. База данных iptv-org
-    3. Ключевые слова
-    """
-    # 1. Пробуем нормализовать оригинальную категорию
-    if original_category:
-        normalized = normalize_category_from_original(original_category)
-        if normalized:
-            return normalized
+    if any(x in name_lower for x in ['первый', 'россия', 'нтв', 'тнт', 'стс']):
+        return " Федеральные и Общие"
     
-    # 2. Ищем в базе данных iptv-org
-    name_lower = channel_name.lower().strip()
-    if name_lower in channel_db:
-        return channel_db[name_lower]
-    
-    # 3. Пробуем по ключевым словам
-    keyword_category = categorize_by_keywords(channel_name)
-    if keyword_category != "📦 Разное":
-        return keyword_category
-    
-    # 4. Всё остальное - в Разное
     return "📦 Разное"
 
-def fix_extinf(extinf_line, channel_name, channel_db):
-    """Гарантируем наличие tvg-id, tvg-name и правильной категории"""
+def fix_extinf(extinf_line, channel_name, epg_categories):
     safe_id = re.sub(r'[^a-zа-я0-9]', '', channel_name.lower())
+    tvg_id = get_tvg_id(extinf_line)
     
-    original_category = get_original_category(extinf_line)
-    best_category = get_best_category(channel_name, original_category, channel_db)
+    # Сначала ищем в EPG
+    category = get_category_from_epg(channel_name, tvg_id, epg_categories)
     
-    # Добавляем/исправляем tvg-id
+    # Если не нашли - fallback
+    if not category:
+        category = get_category_fallback(channel_name)
+    
+    # Добавляем tvg-id
     if 'tvg-id=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
     
-    # Добавляем/исправляем tvg-name
+    # Добавляем tvg-name
     if 'tvg-name=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
     
-    # Заменяем/добавляем group-title
+    # Заменяем group-title
     if 'group-title=' in extinf_line.lower():
-        extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{best_category}"', extinf_line)
+        extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{category}"', extinf_line)
     else:
-        extinf_line = re.sub(r'(#EXTINF:[^,]*,)', f'\\1 group-title="{best_category}" ', extinf_line)
+        extinf_line = re.sub(r'(#EXTINF:[^,]*,)', f'\\1 group-title="{category}" ', extinf_line)
         if 'group-title=' not in extinf_line:
-            extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: group-title="{best_category}" ', 1)
+            extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: group-title="{category}" ', 1)
     
     return extinf_line
 
 def get_existing_urls():
     urls = set()
-    if not os.path.exists(SOURCES_FILE): return urls
+    if not os.path.exists(SOURCES_FILE):
+        return urls
     with open(SOURCES_FILE, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -227,16 +237,20 @@ def find_github_playlists():
         return new_urls
 
     for repo in repos:
-        if repo.get("fork", False) or repo.get("stargazers_count", 0) < 5: continue
+        if repo.get("fork", False) or repo.get("stargazers_count", 0) < 5:
+            continue
         repo_name = repo["full_name"]
         default_branch = repo.get("default_branch", "main")
         tree_url = f"https://api.github.com/repos/{repo_name}/git/trees/{default_branch}?recursive=1"
         try:
             tree_resp = requests.get(tree_url, headers=HEADERS, timeout=15)
-            if tree_resp.status_code != 200: continue
+            if tree_resp.status_code != 200:
+                continue
             tree_data = tree_resp.json()
-        except Exception: continue
-        if "tree" not in tree_data: continue
+        except Exception:
+            continue
+        if "tree" not in tree_data:
+            continue
         for item in tree_data["tree"]:
             if item["type"] == "blob":
                 path = item["path"]
@@ -271,16 +285,17 @@ def update_sources_file(new_urls):
                     manual_lines.append(line)
     auto_urls.update(urls_to_add)
     with open(SOURCES_FILE, "w", encoding="utf-8") as f:
-        f.writelines(manual_lines)       
+        f.writelines(manual_lines)
         f.write("\n")
-        f.write(auto_marker + "\n")      
+        f.write(auto_marker + "\n")
         for url in sorted(list(auto_urls)):
-            f.write(url + "\n")          
+            f.write(url + "\n")
     print(f"✅ Файл {SOURCES_FILE} успешно обновлен.")
 
 def load_sources(filepath):
     sources = []
-    if not os.path.exists(filepath): return sources
+    if not os.path.exists(filepath):
+        return sources
     in_auto_section = False
     auto_marker = "# --- AUTO SOURCES (GitHub Search) ---"
     with open(filepath, "r", encoding="utf-8") as f:
@@ -293,8 +308,8 @@ def load_sources(filepath):
                 sources.append({"url": line, "filter_russian": in_auto_section})
     return sources
 
-def parse_m3u(url, filter_russian=False, channel_db=None):
-    print(f"📥 Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
+def parse_m3u(url, filter_russian=False, epg_categories=None):
+    print(f" Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
     try:
         response = requests.get(url, timeout=15)
         response.raise_for_status()
@@ -302,21 +317,22 @@ def parse_m3u(url, filter_russian=False, channel_db=None):
         print(f"❌ Ошибка загрузки {url}: {e}")
         return []
     
-    if channel_db is None:
-        channel_db = {}
+    if epg_categories is None:
+        epg_categories = {}
         
     channels = []
     lines = response.text.splitlines()
     current_extinf = ""
     for line in lines:
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
         if line.startswith("#EXTINF:"):
             current_extinf = line
         elif line.startswith("http"):
             if not filter_russian or is_russian_channel(current_extinf):
                 name = get_channel_name(current_extinf)
-                fixed_extinf = fix_extinf(current_extinf, name, channel_db)
+                fixed_extinf = fix_extinf(current_extinf, name, epg_categories)
                 channels.append({"extinf": fixed_extinf, "url": line})
             current_extinf = ""
     print(f"   ✅ Найдено каналов: {len(channels)}")
@@ -327,9 +343,9 @@ def get_category_for_sort(extinf_line):
     return match.group(1) if match else "📦 Разное"
 
 def main():
-    # Загружаем базу категорий
-    print("\n📚 Загрузка базы категорий каналов...")
-    channel_db = load_channel_database()
+    # Загружаем категории из EPG
+    print("\n📚 Загрузка категорий из EPG...")
+    epg_categories = load_epg_categories()
     
     gh_urls = find_github_playlists()
     update_sources_file(gh_urls)
@@ -341,9 +357,9 @@ def main():
     
     all_channels = []
     for src in sources:
-        channels = parse_m3u(src["url"], filter_russian=src["filter_russian"], channel_db=channel_db)
+        channels = parse_m3u(src["url"], filter_russian=src["filter_russian"], epg_categories=epg_categories)
         all_channels.extend(channels)
-    print(f"\n📊 Всего каналов до обработки: {len(all_channels)}")
+    print(f"\n Всего каналов до обработки: {len(all_channels)}")
     
     # ДЕДУПЛИКАЦИЯ ПО ИМЕНИ КАНАЛА
     seen_names = set()
@@ -370,13 +386,13 @@ def main():
     print(f"\n✅ Успешно сохранено {len(unique_channels)} уникальных каналов в {OUTPUT_FILE}")
     print(f"🗑 Удалено дубликатов (по имени): {removed_count}")
     
-    # Статистика по категориям
+    # Статистика
     categories_count = {}
     for ch in unique_channels:
         cat = get_category_for_sort(ch['extinf'])
         categories_count[cat] = categories_count.get(cat, 0) + 1
     
-    print("\n📊 Распределение по категориям:")
+    print("\n Категории:")
     for cat, count in sorted(categories_count.items(), key=lambda x: x[1], reverse=True):
         print(f"  {cat}: {count}")
 
