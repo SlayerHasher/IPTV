@@ -5,6 +5,8 @@ import re
 # === НАСТРОЙКИ ===
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
+# Используем самую полную и стабильную EPG для русскоязычных каналов
+EPG_URL = "https://epg.ottclub.ru/epg.xml.gz"
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -22,13 +24,31 @@ def is_russian_channel(extinf_line):
     country_match = re.search(r'tvg-country="([^"]*)"', line_lower)
     if country_match:
         countries = [c.strip() for c in country_match.group(1).split(';')]
-        if any(c in ['ru', 'rus'] for c in countries):
+        if any(c in ['ru', 'rus', 'by', 'kz', 'ua'] for c in countries): # Добавили BY, KZ, UA для полноты русскоязычного контента
             return True
     return False
 
 def get_channel_name(extinf_line):
     match = re.search(r',(.*?)$', extinf_line)
-    return match.group(1).strip().lower() if match else ""
+    return match.group(1).strip() if match else "Unknown"
+
+def fix_extinf(extinf_line, channel_name):
+    """
+    Гарантирует, что у канала есть tvg-id и tvg-name для корректной работы EPG.
+    Если их нет, создает их на основе названия канала.
+    """
+    # Создаем безопасный ID из названия (нижний регистр, без пробелов и спецсимволов)
+    safe_id = re.sub(r'[^a-zа-я0-9]', '', channel_name.lower())
+    
+    # Если tvg-id нет, добавляем его
+    if 'tvg-id=' not in extinf_line.lower():
+        extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
+        
+    # Если tvg-name нет, добавляем его
+    if 'tvg-name=' not in extinf_line.lower():
+        extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
+        
+    return extinf_line
 
 def get_existing_urls():
     urls = set()
@@ -143,7 +163,10 @@ def parse_m3u(url, filter_russian=False):
             current_extinf = line
         elif line.startswith("http"):
             if not filter_russian or is_russian_channel(current_extinf):
-                channels.append({"extinf": current_extinf, "url": line})
+                name = get_channel_name(current_extinf)
+                # "Чиним" метаданные для лучшего совпадения с EPG
+                fixed_extinf = fix_extinf(current_extinf, name)
+                channels.append({"extinf": fixed_extinf, "url": line})
             current_extinf = ""
     print(f"   ✅ Найдено каналов: {len(channels)}")
     return channels
@@ -168,9 +191,10 @@ def main():
         if norm_url not in seen_urls:
             seen_urls.add(norm_url)
             unique_channels.append(ch)
-    unique_channels.sort(key=lambda x: get_channel_name(x['extinf']))
+    unique_channels.sort(key=lambda x: get_channel_name(x['extinf']).lower())
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        f.write('#EXTM3U url-tvg="https://iptv-org.github.io/epg/languages/rus.epg.xml"\n')
+        # Указываем лучшую ссылку на EPG прямо в заголовке
+        f.write(f'#EXTM3U url-tvg="{EPG_URL}"\n')
         for ch in unique_channels:
             f.write(f"{ch['extinf']}\n")
             f.write(f"{ch['url']}\n")
