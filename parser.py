@@ -5,7 +5,6 @@ import re
 # === НАСТРОЙКИ ===
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
-# Используем самую полную и стабильную EPG для русскоязычных каналов
 EPG_URL = "https://epg.ottclub.ru/epg.xml.gz"
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -24,7 +23,7 @@ def is_russian_channel(extinf_line):
     country_match = re.search(r'tvg-country="([^"]*)"', line_lower)
     if country_match:
         countries = [c.strip() for c in country_match.group(1).split(';')]
-        if any(c in ['ru', 'rus', 'by', 'kz', 'ua'] for c in countries): # Добавили BY, KZ, UA для полноты русскоязычного контента
+        if any(c in ['ru', 'rus', 'by', 'kz', 'ua'] for c in countries):
             return True
     return False
 
@@ -32,22 +31,60 @@ def get_channel_name(extinf_line):
     match = re.search(r',(.*?)$', extinf_line)
     return match.group(1).strip() if match else "Unknown"
 
+def normalize_category(name, existing_group=""):
+    """Анализирует имя канала и существующую группу, возвращая стандартизированную категорию"""
+    text_to_check = (name + " " + existing_group).lower()
+    
+    if any(word in text_to_check for word in ['кино', 'movie', 'film', 'сериал', 'premiere', 'tv1000', 'кинопоказ', 'кинохит', 'ilove', 'a1', 'a2', 'indigo']):
+        return "🎬 Кино и Сериалы"
+    elif any(word in text_to_check for word in ['спорт', 'sport', 'матч', 'match', 'футбол', 'бокс', 'кхл', 'ufc', 'боец']):
+        return "⚽ Спорт"
+    elif any(word in text_to_check for word in ['новости', 'news', '24', 'дождь', 'звезда', 'мир', 'vesti']):
+        return "📰 Новости"
+    elif any(word in text_to_check for word in ['детский', 'kids', 'карусель', 'мульт', 'nickelodeon', 'disney', 'gulli', 'tiiji']):
+        return "🧸 Детские"
+    elif any(word in text_to_check for word in ['музыка', 'music', 'mtv', 'мюзик', 'bridge', 'ru.tv', 'телекафе']):
+        return "🎵 Музыка"
+    elif any(word in text_to_check for word in ['познавательный', 'doc', 'discovery', 'national', 'история', 'наука', 'travel', 'охота', 'рыбалка', 'загородный']):
+        return "🌍 Познавательные"
+    elif any(word in text_to_check for word in ['религия', 'religion', 'спас', 'союз', 'вера']):
+        return "🙏 Религиозные"
+    elif any(word in text_to_check for word in ['регион', 'спб', 'spb', 'кубань', 'катод', 'tv21', 'архыз', 'ямал']):
+        return "🏛 Региональные"
+    elif any(word in text_to_check for word in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'рен', 'тв3', 'пятница', 'че', 'домашний', 'звезда', 'общественное']):
+        return "📺 Федеральные и Общие"
+    else:
+        return "📦 Разное"
+
 def fix_extinf(extinf_line, channel_name):
-    """
-    Гарантирует, что у канала есть tvg-id и tvg-name для корректной работы EPG.
-    Если их нет, создает их на основе названия канала.
-    """
-    # Создаем безопасный ID из названия (нижний регистр, без пробелов и спецсимволов)
+    """Гарантирует наличие tvg-id, tvg-name и ПРАВИЛЬНОГО group-title"""
     safe_id = re.sub(r'[^a-zа-я0-9]', '', channel_name.lower())
     
-    # Если tvg-id нет, добавляем его
+    # Извлекаем текущую группу, если она есть
+    group_match = re.search(r'group-title="([^"]*)"', extinf_line)
+    current_group = group_match.group(1) if group_match else ""
+    
+    # Определяем новую, чистую категорию
+    new_category = normalize_category(channel_name, current_group)
+    
+    # 1. Чиним tvg-id
     if 'tvg-id=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
         
-    # Если tvg-name нет, добавляем его
+    # 2. Чиним tvg-name
     if 'tvg-name=' not in extinf_line.lower():
         extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
         
+    # 3. Заменяем или добавляем group-title
+    if group_match:
+        extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{new_category}"', extinf_line)
+    else:
+        # Если group-title не было, добавляем его после #EXTINF:
+        extinf_line = re.sub(r'(#EXTINF:[^,]*,)', f'\\1 group-title="{new_category}" ', extinf_line)
+        # Если и это не сработало (кривой формат), просто добавляем в начало
+        if 'group-title=' not in extinf_line:
+            extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: group-title="{new_category}" ', 1)
+            
     return extinf_line
 
 def get_existing_urls():
@@ -164,7 +201,6 @@ def parse_m3u(url, filter_russian=False):
         elif line.startswith("http"):
             if not filter_russian or is_russian_channel(current_extinf):
                 name = get_channel_name(current_extinf)
-                # "Чиним" метаданные для лучшего совпадения с EPG
                 fixed_extinf = fix_extinf(current_extinf, name)
                 channels.append({"extinf": fixed_extinf, "url": line})
             current_extinf = ""
@@ -191,9 +227,11 @@ def main():
         if norm_url not in seen_urls:
             seen_urls.add(norm_url)
             unique_channels.append(ch)
-    unique_channels.sort(key=lambda x: get_channel_name(x['extinf']).lower())
+    
+    # Сортировка сначала по категории, потом по имени канала
+    unique_channels.sort(key=lambda x: (get_normalized_category_for_sort(x['extinf']), get_channel_name(x['extinf']).lower()))
+    
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        # Указываем лучшую ссылку на EPG прямо в заголовке
         f.write(f'#EXTM3U url-tvg="{EPG_URL}"\n')
         for ch in unique_channels:
             f.write(f"{ch['extinf']}\n")
@@ -201,6 +239,11 @@ def main():
     removed_count = len(all_channels) - len(unique_channels)
     print(f"\n✅ Успешно сохранено {len(unique_channels)} уникальных каналов в {OUTPUT_FILE}")
     print(f"🗑 Удалено дубликатов (по URL): {removed_count}")
+
+def get_normalized_category_for_sort(extinf_line):
+    """Вспомогательная функция для сортировки по категориям"""
+    match = re.search(r'group-title="([^"]*)"', extinf_line)
+    return match.group(1) if match else "📦 Разное"
 
 if __name__ == "__main__":
     main()
