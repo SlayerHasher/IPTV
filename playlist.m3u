@@ -1599,8 +1599,8 @@ http://stream.mcquack.net/182/index.m3u8
 http://stream.mcquack.net/129/index.m3u8
 #EXTINF: tvg-name="Fox Life HD" tvg-id="foxlifehd"-1 group-title="📦 Разное",Fox Life HD
 http://127.0.0.1:6878/ace/getstream?id=36bd5c1fdf09e5e92aa68cc642ae2d4db6694526
-#EXTINF: tvg-name="Freedom (FREEДOM) (UATV) (720p)"-1 tvg-id="FREEDOM.ua@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/FreeDOMUAlogo.svg/960px-FreeDOMUAlogo.svg.png" group-title="📦 Разное",Freedom (FREEДOM) (UATV) (720p)
-https://freedom.cdn-01.cosmonova.net.ua/mobile-app/main/freedom/master.m3u8
+#EXTINF: tvg-name="FREEDOM (1080p)"-1 tvg-id="FREEDOM.ua@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/FreeDOMUAlogo.svg/960px-FreeDOMUAlogo.svg.png" group-title="📦 Разное",FREEDOM (1080p)
+https://dash4.antik.sk/live/test_uatv/playlist.m3u8
 #EXTINF: tvg-name="Fresh HD AM" tvg-id="freshhdam"-1 group-title="📦 Разное" tvg-logo="http://epg.it999.ru/img/5606.png",Fresh HD AM
 https://freshtv-live.ru/FreshTV/tracks-v1a1/mono.m3u8?token=livestream
 #EXTINF: tvg-name="Friday! (576p)"-1 tvg-id="Friday.ru@SD" tvg-logo="https://i.imgur.com/UfmlXxe.png" group-title="📦 Разное",Friday! (576p)
@@ -1807,8 +1807,6 @@ http://de.russkoe-iptv.com:88/s/s-e3dc39e0/ljova-hd.m3u8
 https://mhd116.iptv2022.com/x/xw5lGEPlV74Zly3INy_wjg,1785654544/streaming/livetvaz/324/1/index.m3u8
 #EXTINF: tvg-name="Love Nature (1080p)"-1 tvg-id="LoveNature.ca@SD" tvg-logo="https://tv.lovenature.com/wp-content/uploads/2024/10/LoveNature2024_Logo_full_colour-copy.png" group-title="📦 Разное",Love Nature (1080p)
 https://aegis-cloudfront-1.tubi.video/6d6d0f24-8445-4b4c-bdf6-44f9e38beaa4/playlist.m3u8
-#EXTINF: tvg-name="Love Nature HD (720p)"-1 tvg-id="LoveNature.ca@HD" tvg-logo="https://tv.lovenature.com/wp-content/uploads/2024/10/LoveNature2024_Logo_full_colour-copy.png" group-title="📦 Разное",Love Nature HD (720p)
-http://185.246.209.113/LOVENATUREHD/index.m3u8
 #EXTINF: tvg-name="Lux TV" tvg-id="luxtv"-1 group-title="📦 Разное",Lux TV
 https://stream8.cinerama.uz/1210/tracks-v1a1/mono.m3u8
 #EXTINF: tvg-name="Luxe TV (1080p)"-1 tvg-id="LuxeTV.lu@SD" tvg-logo="https://i.imgur.com/24ehonx.png" group-title="📦 Разное",Luxe TV (1080p)
@@ -2603,8 +2601,8 @@ http://tv.ttk.mx:9189
 http://de.russkoe-iptv.com:88/s/s-e3dc39e0/tip-top-hd.m3u8
 #EXTINF: tvg-name="TLC" tvg-id="tlc"-1 group-title="📦 Разное" catchup="append" catchup-days="7" catchup-type="flussonic",TLC
 http://hls.stb.md/DISCOVERY_TLC_H264/video.m3u8?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpcCI6IjEwOS4yMDEuMTUyLjE4MSIsIm5iZiI6MTc4NTU2ODExOSwiZXhwIjoxNzg1NjU0NTE5LCJpYXQiOjE3ODU1NjgxMTksImlzcyI6InN0Yi5zdGFybmV0Lm1kIn0.RZsiFUgtW3AxH-TDyoEie3YBUwNt8blps447hTDViOY
-#EXTINF: tvg-name="TMB TV"-1 tvg-id="TMB.tr@SD" tvg-logo="https://i.imgur.com/28AyWHe.png" group-title="📦 Разное",TMB TV
-https://raw.githubusercontent.com/UzunMuhalefet/streams/refs/heads/main/myvideo-az/tmb-azerbaycan.m3u8
+#EXTINF: tvg-name="TMB"-1 tvg-id="TMB.tr@SD" tvg-logo="https://i.imgur.com/28AyWHe.png" group-title="📦 Разное",TMB
+https://raw.githubusercontent.com/UzunMuhalefet/streams/main/myvideo-az/tmb-tv.m3u8
 #EXTINF: tvg-name="TNA Wrestling Channel" tvg-id="tnawrestlingchannel"-1 group-title="📦 Разное",TNA Wrestling Channel
 https://jmp2.uk/plex-5e20b730f2f8d5003d739db7-606605549dbfca002d2ae873.m3u8
 #EXTINF: tvg-name="TNT (576p)"-1 tvg-id="TNT.ru@SD" tvg-logo="https://i.imgur.com/T4A6rEI.png" group-title="📦 Разное",TNT (576p)
