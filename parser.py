@@ -308,6 +308,19 @@ def load_sources(filepath):
                 sources.append({"url": line, "filter_russian": in_auto_section})
     return sources
 
+def is_stub_url(url):
+    """Проверка на заведомо нерабочие заглушки (только явные случаи)"""
+    url_lower = url.lower()
+    # Только абсолютно явные заглушки, которые НЕ могут быть рабочими
+    stub_patterns = [
+        '127.0.0.1',       # localhost IP
+        'localhost',       # localhost имя
+        'example.com',     # резервное доменное имя
+        '0.0.0.0',         # все интерфейсы (невалидно для клиента)
+        'acestream://',    # Ace Stream требует отдельного клиента (не HTTP)
+    ]
+    return any(pattern in url_lower for pattern in stub_patterns)
+
 def parse_m3u(url, filter_russian=False, epg_categories=None):
     print(f" Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
     try:
@@ -330,6 +343,9 @@ def parse_m3u(url, filter_russian=False, epg_categories=None):
         if line.startswith("#EXTINF:"):
             current_extinf = line
         elif line.startswith("http"):
+            # Пропускаем заглушки
+            if is_stub_url(line):
+                continue
             if not filter_russian or is_russian_channel(current_extinf):
                 name = get_channel_name(current_extinf)
                 fixed_extinf = fix_extinf(current_extinf, name, epg_categories)
