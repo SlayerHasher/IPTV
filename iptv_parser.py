@@ -5,6 +5,7 @@ import gzip
 import json
 import time
 import hashlib
+import unicodedata
 import xml.etree.ElementTree as ET
 from io import BytesIO
 
@@ -18,8 +19,16 @@ IPTV_ORG_CHANNELS_URLS = [
     "https://iptv-org.github.io/api/channels.json",
     "https://raw.githubusercontent.com/iptv-org/iptv.org/master/api/public/channels.json",
 ]
-# Дополнительно: xmltv-категории из EPTG (iptvx.one) — если там когда-нибудь появятся <category>
-EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
+# EPG-источники (xmltv). Плееры берут программу передач по url-tvg из #EXTM3U,
+# а канал сопоставляется по tvg-id == <channel id="..."> в одном из этих файлов.
+# iptvx.one — основной (~2800 каналов RU/CIS), epg.itvclub.su — дополнительный,
+# перекрывающий каналы, отсутствующие в iptvx.one.
+EPG_URLS = [
+    "https://iptvx.one/epg/epg.xml.gz",
+    "https://epg.itvclub.su/epg_all.xml.gz",
+]
+# Совместимость: url-tvg и старый код ожидают одну строку
+EPG_URL = ",".join(EPG_URLS)
 # Кэш EPG между запусками (в CI можно ускорить дополнительно через actions/cache)
 EPG_CACHE_DIR = ".cache"
 EPG_CACHE_TTL_SECONDS = 6 * 3600  # 6 часов: плейлист пересобирается раз в сутки
@@ -82,9 +91,72 @@ EPG_CATEGORY_MAP = {
     'shop': '🛍️ Шопинг',
 }
 
-def _epg_cache_path():
-    url_hash = hashlib.sha1(EPG_URL.encode("utf-8")).hexdigest()[:12]
+def _epg_cache_path(url):
+    url_hash = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
     return os.path.join(EPG_CACHE_DIR, f"epg_{url_hash}.xml.gz")
+
+def normalize_id(s):
+    """Нормализация идентификатора/имени канала для нестрогого сопоставления:
+    lower + NFKD + снятие суффиксов качества (HD/SD/4K/1080p...) + только [a-zа-я0-9]."""
+    s = unicodedata.normalize("NFKD", (s or "").lower())
+    s = re.sub(r'\b(?:hd|fhd|sd|uhd|4k|2160p?|1080p?|720p?|576p?|full\s*hd)\b', '', s)
+    s = re.sub(r'\((?:up|down)?scaled\)', '', s)
+    return re.sub(r'[^a-zа-я0-9]+', '', s)
+
+
+def parse_epg_channels(raw_gz):
+    """Разбор секции <channel> из xmltv EPG (потоково, без загрузки ~300 МБ в память).
+
+    Возвращает (ids, by_norm): множество id каналов (нижний регистр) и
+    нормализованное имя -> id. Используется для подбора tvg-id, по которому
+    плееры затем скачивают программу передач.
+
+    Важно: чанки распакованного XML склеиваются с хвостом предыдущего буфера —
+    иначе теги <channel> на границах чанков терялись (из ~4300 каналов EPG
+    находилось лишь ~600), и матчинг tvg-id не работал."""
+    ids = set()
+    by_norm = {}
+    ch_re = re.compile(r'<channel id="([^"]+)">(.*?)</channel>', re.S)
+    dn_re = re.compile(r'<display-name>([^<]+)</display-name>')
+    buf = ""
+    with gzip.GzipFile(fileobj=BytesIO(raw_gz), mode="rb") as gz:
+        while True:
+            chunk = gz.read(1 << 20)
+            if not chunk:
+                break
+            try:
+                buf += chunk.decode("utf-8", errors="replace")
+            except Exception:
+                break
+            prog_pos = buf.find("<programme")
+            if prog_pos != -1:
+                # секция <channel> закончилась — дальше только программы
+                buf = buf[:prog_pos]
+                for m in ch_re.finditer(buf):
+                    cid = m.group(1).lower()
+                    ids.add(cid)
+                    for dn in dn_re.findall(m.group(2)):
+                        key = normalize_id(dn)
+                        if key:
+                            by_norm.setdefault(key, cid)
+                    key = normalize_id(cid)
+                    if key:
+                        by_norm.setdefault(key, cid)
+                break
+            for m in ch_re.finditer(buf):
+                cid = m.group(1).lower()
+                ids.add(cid)
+                for dn in dn_re.findall(m.group(2)):
+                    key = normalize_id(dn)
+                    if key:
+                        by_norm.setdefault(key, cid)
+                key = normalize_id(cid)
+                if key:
+                    by_norm.setdefault(key, cid)
+            # оставляем хвост, чтобы не терять теги на границе чанков
+            buf = buf[-4096:]
+    return ids, by_norm
+
 
 def _parse_epg_stream(stream):
     """Потоковый разбор XML EPG без загрузки всего текста в память
@@ -108,10 +180,10 @@ def _parse_epg_stream(stream):
             elem.clear()  # освобождаем память разобранных узлов
     return categories
 
-def load_epg_xml_bytes(session=None):
-    """Возвращает СЫРОЙ (сжатый) gz-файл EPG, используя локальный кэш (TTL 6 часов),
-    чтобы не скачивать ~50 МБ при каждом запуске."""
-    cache_path = _epg_cache_path()
+def load_epg_xml_bytes(url, session=None):
+    """Возвращает СЫРОЙ (сжатый) gz-файл EPG по одному URL, с локальным кэшем (TTL 6 часов),
+    чтобы не скачивать десятки МБ при каждом запуске."""
+    cache_path = _epg_cache_path(url)
     try:
         if os.path.exists(cache_path) and \
            (time.time() - os.path.getmtime(cache_path)) < EPG_CACHE_TTL_SECONDS:
@@ -123,11 +195,11 @@ def load_epg_xml_bytes(session=None):
 
     getter = session or requests
     try:
-        response = fetch_url(EPG_URL, session=getter, timeout=120)
+        response = fetch_url(url, session=getter, timeout=120)
     except Exception as e:
         # Свежий кэш не успел протухнуть — используем его даже если TTL истёк
         if os.path.exists(cache_path):
-            print(f"⚠️ EPG недоступен ({type(e).__name__}), использую устаревший кэш")
+            print(f"⚠️ EPG недоступен ({type(e).__name__}), использую устаревший кэш: {url}")
             with open(cache_path, "rb") as f:
                 return f.read()
         raise
@@ -142,6 +214,18 @@ def load_epg_xml_bytes(session=None):
     except OSError as e:
         print(f"⚠️ Не удалось записать кэш EPG: {e}")
     return raw_gz
+
+def load_all_epg_bytes(session=None):
+    """Список сырых gz по всем EPG_URLS; сбои отдельных источников не фатальны."""
+    results = []
+    for url in EPG_URLS:
+        try:
+            results.append(load_epg_xml_bytes(url, session=session))
+        except Exception as e:
+            print(f"⚠️ Пропускаю EPG-источник {url}: {type(e).__name__}: {e}", flush=True)
+    if not results:
+        raise RuntimeError("Ни один EPG-источник недоступен и кэш пуст")
+    return results
 
 def load_iptv_org_categories(session=None):
     """Канал → категория из iptv-org API (channels.json, поле "categories").
@@ -210,23 +294,120 @@ def _build_org_category_map(channels):
     return result
 
 def load_epg_categories(session=None):
-    """Объединённая база «канал → категория»: iptv-org API (основа) + xmltv EPG (дополнение)"""
+    """Объединённая база «канал → категория»: iptv-org API (основа) + xmltv EPG (дополнение).
+
+    Возвращает (merged, epg_channel_ids, epg_names_by_norm), где epg_channel_ids —
+    множество id каналов из ВСЕХ xmltv EPG-файлов, а epg_names_by_norm — нормализованное
+    имя → id. Это нужно для подбора tvg-id: без корректного tvg-id плеер не сможет
+    показать программу передач даже если категория определена."""
     merged = load_iptv_org_categories(session=session)
     epg_count = 0
+    epg_channel_ids = set()
+    epg_names_by_norm = {}
     try:
-        raw_gz = load_epg_xml_bytes(session=session)
-        with gzip.GzipFile(fileobj=BytesIO(raw_gz)) as gz:
-            epg_cats = _parse_epg_stream(gz)
-        del raw_gz
-        epg_count = len(epg_cats)
-        # данные EPG не перекрывают iptv-org, только дополняют
-        for k, v in epg_cats.items():
-            merged.setdefault(k, v)
+        for raw_gz in load_all_epg_bytes(session=session):
+            ids, by_norm = parse_epg_channels(raw_gz)
+            epg_channel_ids |= ids
+            for k, v in by_norm.items():
+                epg_names_by_norm.setdefault(k, v)
+            with gzip.GzipFile(fileobj=BytesIO(raw_gz)) as gz:
+                epg_cats = _parse_epg_stream(gz)
+            del raw_gz
+            epg_count += len(epg_cats)
+            # данные EPG не перекрывают iptv-org, только дополняют
+            for k, v in epg_cats.items():
+                merged.setdefault(k, v)
     except Exception as e:
         print(f"❌ Ошибка загрузки EPG: {type(e).__name__}: {e}", flush=True)
     print(f"✅ База категорий: {len(merged)} ключей "
-          f"(из них {epg_count} из xmltv EPG)", flush=True)
-    return merged
+          f"(из них {epg_count} из xmltv EPG; xmltv-каналов с EPG: {len(epg_channel_ids)})", flush=True)
+    return merged, epg_channel_ids, epg_names_by_norm
+
+class EpgIndex:
+    """Индекс xmltv EPG: категории (для групп) + id каналов (для tvg-id).
+
+    Плееры показывают программу передач только когда tvg-id канала совпадает
+    с <channel id="..."> в EPG-файле, поэтому важно проставить именно его.
+
+    Точное/именное сопоставление — по словарям; «тупой» перебор подстрок
+    (шаг 6 resolve_epg_id) выполняется один раз на канал и кэшируется в
+    _substr_cache, чтобы не сканировать ~4000 id для каждого из тысяч каналов."""
+
+    def __init__(self, categories=None, channel_ids=None, names_by_norm=None):
+        self.categories = categories or {}
+        self.channel_ids = channel_ids or set()
+        self.names_by_norm = names_by_norm or {}
+        # отсортируем по убыванию длины: при переборе первым находится наиболее
+        # специфичный (длинный) id, а не короткий префикс-случайность
+        self._ids_sorted = sorted(self.channel_ids, key=len, reverse=True)
+        self._substr_cache = {}
+
+    def resolve_id(self, channel_name, tvg_id):
+        return resolve_epg_id(channel_name, tvg_id, self.channel_ids,
+                              self.names_by_norm, self)
+
+    def substr_match(self, token):
+        """Первое (самое длинное) in/equal вхождение токена среди EPG-id. С кэшем."""
+        if not token or len(token) < 5:
+            return None
+        cached = self._substr_cache.get(token)
+        if cached is not None:
+            return cached or None
+        found = None
+        for eid in self._ids_sorted:
+            if token in eid or eid in token:
+                found = eid
+                break
+        self._substr_cache[token] = found or ""
+        return found
+
+
+def resolve_epg_id(channel_name, tvg_id, epg_channel_ids, epg_names_by_norm, index=None):
+    """Подбирает id канала из xmltv EPG (тот самый tvg-id, по которому плеер ищет программу).
+
+    Возвращает None, если в EPG такого канала нет — тогда оставлять «выдуманный» id
+    бессмысленно: он всё равно ничего не найдёт."""
+    if not epg_channel_ids:
+        return None
+    tid = (tvg_id or "").lower().strip()
+    # 1. Точное совпадение с id в EPG
+    if tid and tid in epg_channel_ids:
+        return tid
+    # 2. iptv-org стиль "Channel.ru@SD" / "ChannelName.us" — убираем гео/качество
+    if tid:
+        base = tid.split("@")[0].split(".")[0]
+        if base and base in epg_channel_ids:
+            return base
+    # 3. Нестрогое сравнение по нормализованному имени канала
+    nn = normalize_id(channel_name)
+    if nn and nn in epg_names_by_norm:
+        return epg_names_by_norm[nn]
+    # 4. Нестрогое сравнение по нормализованному tvg-id
+    nt = normalize_id(tid)
+    if nt and nt in epg_names_by_norm:
+        return epg_names_by_norm[nt]
+    # 5. Имя без служебных пометок источников: "(720p)", "[Geo-blocked]", "[Not 24/7]"
+    clean_name = re.sub(r'[\[(][^\])]*[\])]', ' ', channel_name or '')
+    cn = normalize_id(clean_name)
+    if cn and cn != nn and cn in epg_names_by_norm:
+        return epg_names_by_norm[cn]
+    # 6. Частичное совпадение: имя/id содержит EPG-id как токен или наоборот
+    # (например "Матч! Игра HD" -> "matchigra", "Охота и рыбалка" -> "ohotaierybalka")
+    if index is not None:
+        return index.substr_match(nt) or index.substr_match(cn) or index.substr_match(nn)
+    for token in (nt, cn, nn):
+        if token and len(token) >= 5:
+            for eid in sorted(epg_channel_ids, key=len, reverse=True):
+                if token in eid or eid in token:
+                    return eid
+    return None
+
+
+def load_epg_index(session=None):
+    merged, epg_channel_ids, epg_names_by_norm = load_epg_categories(session=session)
+    return EpgIndex(categories=merged, channel_ids=epg_channel_ids,
+                    names_by_norm=epg_names_by_norm)
+
 
 def map_category(epg_category):
     """Преобразуем категорию из EPG в наш формат"""
@@ -343,14 +524,21 @@ def get_category_fallback(name):
     
     return "📦 Разное"
 
-def fix_extinf(extinf_line, channel_name, epg_categories):
+def fix_extinf(extinf_line, channel_name, epg_index):
     """Пересобирает строку #EXTINF корректно: сначала атрибуты, затем
-    имя канала после запятой. Чинит исходный порядок 'атрибуты,-1,имя'."""
+    имя канала после запятой. Чинит исходный порядок 'атрибуты,-1,имя'.
+
+    epg_index — EpgIndex (или dict категорий для обратной совместимости):
+    используется и для подбора группы (group-title), и для подстановки
+    реального xmltv-идентификатора в tvg-id, по которому плееры находят
+    программу передач."""
+    if not isinstance(epg_index, EpgIndex):
+        epg_index = EpgIndex(categories=epg_index or {})
     safe_id = re.sub(r'[^a-zа-я0-9]', '', channel_name.lower())
     tvg_id = get_tvg_id(extinf_line)
 
     # Сначала ищем в EPG
-    category = get_category_from_epg(channel_name, tvg_id, epg_categories)
+    category = get_category_from_epg(channel_name, tvg_id, epg_index.categories)
 
     # Если не нашли - fallback
     if not category:
@@ -364,7 +552,13 @@ def fix_extinf(extinf_line, channel_name, epg_categories):
         if m and m.group(1):
             attrs[key] = m.group(1)
 
-    attrs.setdefault("tvg-id", tvg_id or safe_id)
+    # Подбираем id, реально присутствующий в xmltv EPG: без него программа
+    # передач не подтянется, даже если id в источнике формально есть.
+    resolved_id = epg_index.resolve_id(channel_name, tvg_id)
+    if resolved_id:
+        attrs["tvg-id"] = resolved_id
+    else:
+        attrs.setdefault("tvg-id", tvg_id or safe_id)
     attrs["tvg-name"] = channel_name
     attrs["group-title"] = category
 
@@ -518,7 +712,7 @@ def is_expired_token_url(url):
     """Ссылки с временными токенами (wmsAuthSign, token=...) протухают через часы."""
     return bool(EXPIRING_TOKEN_RE.search(url))
 
-def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
+def parse_m3u(url, filter_russian=False, epg_index=None, session=None):
     print(f" Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
     try:
         response = fetch_url(url, session=session)
@@ -526,8 +720,8 @@ def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
         print(f"❌ Ошибка загрузки {url}: {e}")
         return []
     
-    if epg_categories is None:
-        epg_categories = {}
+    if epg_index is None:
+        epg_index = EpgIndex()
         
     channels = []
     skipped_tokens = 0
@@ -550,7 +744,7 @@ def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
                 if not name or name == "Unknown":
                     current_extinf = ""
                     continue
-                fixed_extinf = fix_extinf(current_extinf, name, epg_categories)
+                fixed_extinf = fix_extinf(current_extinf, name, epg_index)
                 channels.append({"extinf": fixed_extinf, "url": line})
             current_extinf = ""
     suffix = f" (пропущено сессий с протухающими токенами: {skipped_tokens})" if skipped_tokens else ""
@@ -565,9 +759,9 @@ def main():
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; iptv-parser)"})
 
-    # Загружаем категории из EPG (с локальным кэшем)
-    print("\n📚 Загрузка категорий из EPG...")
-    epg_categories = load_epg_categories(session=session)
+    # Загружаем категории и индекс xmltv-id из EPG (с локальным кэшем)
+    print("\n📚 Загрузка категорий и EPG-индекса...")
+    epg_index = load_epg_index(session=session)
 
     gh_urls = find_github_playlists()
     update_sources_file(gh_urls)
@@ -586,7 +780,7 @@ def main():
         seen_urls.add(src["url"])
         print(f"[{idx}/{len(sources)}] elapsed {time.time()-started:.0f}s", flush=True)
         channels = parse_m3u(src["url"], filter_russian=src["filter_russian"],
-                             epg_categories=epg_categories, session=session)
+                             epg_index=epg_index, session=session)
         all_channels.extend(channels)
     print(f"\n Всего каналов до обработки: {len(all_channels)}")
     

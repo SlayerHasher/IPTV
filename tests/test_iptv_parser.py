@@ -167,6 +167,27 @@ class TestEpgStreamParser(unittest.TestCase):
         self.assertNotIn("sport.tv.2@ru", cats)      # нет category — не добавляем
         self.assertNotIn("bez kategorii", cats)       # пустая category — игнор
 
+    def test_parse_epg_channels_spanning_chunks(self):
+        """Теги <channel>, попавшие на границу 1МБ-чанков, не должны теряться
+        (регрессия: раньше из ~4300 каналов EPG находилось ~600)."""
+        import gzip as _gzip
+        from io import BytesIO as _B
+        n = 900  # с учётом «прокладки» каждый чанк режет теги <channel>
+        parts = []
+        for i in range(n):
+            parts.append(f'<channel id="Ch{i}.ru"><display-name>Канал {i}</display-name></channel>')
+            parts.append('<!--' + 'x' * 5000 + '-->')  # прокладка для резки на границах
+        xml = ('<?xml version="1.0"?><tv>' + ''.join(parts) +
+               '<programme start="20260101000000">t</programme></tv>').encode('utf-8')
+        raw_gz = _gzip.compress(xml)
+        ids, by_norm = p.parse_epg_channels(raw_gz)
+        self.assertEqual(len(ids), n)
+        self.assertIn('ch0.ru', ids)
+        self.assertIn(f'ch{n - 1}.ru', ids)
+        self.assertEqual(by_norm.get('канал5'), 'ch5.ru')
+        # секция <programme> не должна матчиться как канал
+        self.assertNotIn('t', ids)
+
 
 class TestStubUrls(unittest.TestCase):
     def test_stubs(self):
