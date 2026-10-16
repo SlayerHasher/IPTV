@@ -175,5 +175,44 @@ class TestStubUrls(unittest.TestCase):
         self.assertFalse(p.is_stub_url("https://some.host/x.m3u8"))
 
 
+class TestIptvOrgCategories(unittest.TestCase):
+    """Канал-категории из iptv-org API (channels.json) — основной источник категорий"""
+
+    SAMPLE = [
+        {"id": "PerviyKanal.ru", "name": "Первый Канал", "categories": ["general"]},
+        {"id": "MatchFootball.ru", "name": "Матч! Футбол", "categories": ["sports", "animation"]},
+        {"id": "NoCat.ru", "name": "NoCat", "categories": []},
+        {"id": "RelaxCh.ru", "name": "Relax Channel", "categories": ["relax"]},
+    ]
+
+    def test_build_map_by_id_and_name(self):
+        m = p._build_org_category_map(self.SAMPLE)
+        self.assertEqual(m["perviykanal.ru"], "general")   # id в нижнем регистре
+        self.assertEqual(m["первый канал"], "general")     # и по имени
+        self.assertEqual(m["matchfootball.ru"], "sports")  # берётся первая категория
+        self.assertNotIn("nocat.ru", m)                    # пустые categories пропускаются
+
+    def test_mapped_to_russian_groups(self):
+        m = p._build_org_category_map(self.SAMPLE)
+        self.assertEqual(p.map_category(m["perviykanal.ru"]), "📺 Федеральные и Общие")
+        self.assertEqual(p.map_category(m["matchfootball.ru"]), "⚽ Спорт")
+        self.assertEqual(p.map_category(m["relaxch.ru"]), "🌿 Природа, Охота, Рыбалка и Дача")
+
+    def test_all_known_iptvorg_categories_mapped(self):
+        # ни одна реальная категория iptv-org не должна утекать в «латинские» группы
+        known = ["auto", "kids", "news", "music", "movies", "series", "sports",
+                 "documentary", "lifestyle", "religion", "religious", "shop",
+                 "shopping", "travel", "history", "science", "culture", "art",
+                 "education", "educational", "entertainment", "general", "family",
+                 "weather", "adult", "classic", "comedy", "animation", "relax",
+                 "outdoor", "food", "cooking", "health", "medical", "business",
+                 "finance", "regional", "local", "moto", "hunting", "fishing",
+                 "cinema", "film", "children"]
+        for cat in known:
+            mapped = p.map_category(cat)
+            self.assertTrue(mapped and mapped[0] not in "abcdefghijklmnopqrstuvwxyz",
+                            f"категория '{cat}' не замаплена: {mapped}")
+
+
 if __name__ == "__main__":
     unittest.main()

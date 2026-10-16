@@ -2,6 +2,7 @@ import requests
 import os
 import re
 import gzip
+import json
 import time
 import hashlib
 import xml.etree.ElementTree as ET
@@ -9,6 +10,15 @@ from io import BytesIO
 
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
+# Основной источник категорий — iptv-org API (channels.json содержит поле
+# "categories" для каждого канала; id каналов совпадают с tvg-id в наших плейлистах).
+# В epg.xml.gz от iptvx.one тег <category> отсутствует вовсе (проверено на живом файле),
+# поэтому он остался только как дополнительный источник.
+IPTV_ORG_CHANNELS_URLS = [
+    "https://iptv-org.github.io/api/channels.json",
+    "https://raw.githubusercontent.com/iptv-org/iptv.org/master/api/public/channels.json",
+]
+# Дополнительно: xmltv-категории из EPTG (iptvx.one) — если там когда-нибудь появятся <category>
 EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
 # Кэш EPG между запусками (в CI можно ускорить дополнительно через actions/cache)
 EPG_CACHE_DIR = ".cache"
@@ -55,6 +65,21 @@ EPG_CATEGORY_MAP = {
     'finance': '📰 Новости',
     'regional': '🏛 Региональные каналы',
     'local': '🏛 Региональные каналы',
+    # категории iptv-org database, отсутствовавшие в маппинге:
+    'animation': '🧸 Детские',
+    'kids': '🧸 Детские',
+    'classic': '🎬 Кино и Сериалы',
+    'comedy': '🎬 Кино и Сериалы',
+    'adult': '🔞 18+',
+    'relax': '🌿 Природа, Охота, Рыбалка и Дача',
+    'education': '🌍 Познавательные',
+    'educational': '🌍 Познавательные',
+    'culture': '🌍 Познавательные',
+    'art': '🌍 Познавательные',
+    'family': '🧸 Детские',
+    'weather': '📰 Новости',
+    'religious': '🕍 Религиозные',
+    'shop': '🛍️ Шопинг',
 }
 
 def _epg_cache_path():
@@ -118,19 +143,90 @@ def load_epg_xml_bytes(session=None):
         print(f"⚠️ Не удалось записать кэш EPG: {e}")
     return raw_gz
 
+def load_iptv_org_categories(session=None):
+    """Канал → категория из iptv-org API (channels.json, поле "categories").
+    id каналов вида 'ChannelName.ru' совпадают с tvg-id в наших плейлистах.
+    Кэшируется на диске как и EPG (сжатый JSON)."""
+    print("📥 Загрузка категорий из iptv-org API...", flush=True)
+    cache_path = None
+    try:
+        url_hash = hashlib.sha1(IPTV_ORG_CHANNELS_URLS[0].encode()).hexdigest()[:12]
+        cache_path = os.path.join(EPG_CACHE_DIR, f"iptvorg_{url_hash}.json.gz")
+        if os.path.exists(cache_path) and \
+           (time.time() - os.path.getmtime(cache_path)) < EPG_CACHE_TTL_SECONDS:
+            print(f"📦 iptv-org категории из кэша: {cache_path}")
+            with gzip.GzipFile(cache_path, "rb") as f:
+                channels = json.loads(f.read().decode("utf-8"))
+            return _build_org_category_map(channels)
+    except (OSError, ValueError) as e:
+        print(f"⚠️ Кэш iptv-org повреждён, скачиваю заново: {e}")
+
+    last_err = None
+    for url in IPTV_ORG_CHANNELS_URLS:
+        try:
+            resp = fetch_url(url, session=session, timeout=60)
+            channels = resp.json()
+            if not isinstance(channels, list) or not channels:
+                raise ValueError("некорректный формат channels.json")
+            if cache_path:
+                try:
+                    os.makedirs(EPG_CACHE_DIR, exist_ok=True)
+                    tmp_path = cache_path + ".tmp"
+                    with gzip.GzipFile(tmp_path, "wb") as f:
+                        f.write(resp.content)
+                    os.replace(tmp_path, cache_path)
+                except OSError as e:
+                    print(f"⚠️ Не удалось записать кэш iptv-org: {e}")
+            return _build_org_category_map(channels)
+        except Exception as e:
+            last_err = e
+            print(f"⚠️ Не удалось получить {url}: {type(e).__name__}: {e}", flush=True)
+    # Фолбэк: даже устаревший кэш лучше пустой базы
+    if cache_path and os.path.exists(cache_path):
+        print("⚠️ Использую устаревший кэш iptv-org")
+        try:
+            with gzip.GzipFile(cache_path, "rb") as f:
+                channels = json.loads(f.read().decode("utf-8"))
+            return _build_org_category_map(channels)
+        except (OSError, ValueError):
+            pass
+    print(f"❌ Категории iptv-org недоступны: {last_err}")
+    return {}
+
+def _build_org_category_map(channels):
+    """[{id, name, categories:[...]}] -> {id/имя: первая категория} (в нижнем регистре)"""
+    result = {}
+    for ch in channels:
+        cats = ch.get("categories") or []
+        if not cats:
+            continue
+        cat = str(cats[0]).strip().lower()
+        cid = str(ch.get("id") or "").strip().lower()
+        name = str(ch.get("name") or "").strip().lower()
+        if cid:
+            result.setdefault(cid, cat)
+        if name:
+            result.setdefault(name, cat)
+    return result
+
 def load_epg_categories(session=None):
-    """Скачиваем EPG (или берём из кэша) и извлекаем категории каналов"""
-    print("📥 Загрузка и парсинг EPG...", flush=True)
+    """Объединённая база «канал → категория»: iptv-org API (основа) + xmltv EPG (дополнение)"""
+    merged = load_iptv_org_categories(session=session)
+    epg_count = 0
     try:
         raw_gz = load_epg_xml_bytes(session=session)
         with gzip.GzipFile(fileobj=BytesIO(raw_gz)) as gz:
-            categories = _parse_epg_stream(gz)
+            epg_cats = _parse_epg_stream(gz)
         del raw_gz
-        print(f"✅ Извлечено {len(categories)} каналов с категориями из EPG")
-        return categories
+        epg_count = len(epg_cats)
+        # данные EPG не перекрывают iptv-org, только дополняют
+        for k, v in epg_cats.items():
+            merged.setdefault(k, v)
     except Exception as e:
         print(f"❌ Ошибка загрузки EPG: {type(e).__name__}: {e}", flush=True)
-        return {}
+    print(f"✅ База категорий: {len(merged)} ключей "
+          f"(из них {epg_count} из xmltv EPG)", flush=True)
+    return merged
 
 def map_category(epg_category):
     """Преобразуем категорию из EPG в наш формат"""
