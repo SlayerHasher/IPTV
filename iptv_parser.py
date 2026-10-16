@@ -14,7 +14,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
 
 # Маппинг категорий из EPG в наши
-EPC_CATEGORY_MAP = {
+EPG_CATEGORY_MAP = {
     'movies': '🎬 Кино и Сериалы',
     'cinema': '🎬 Кино и Сериалы',
     'film': '🎬 Кино и Сериалы',
@@ -99,13 +99,14 @@ def map_category(epg_category):
     cat = epg_category.lower().strip()
     
     # Точное совпадение
-    if cat in EPC_CATEGORY_MAP:
-        return EPC_CATEGORY_MAP[cat]
+    if cat in EPG_CATEGORY_MAP:
+        return EPG_CATEGORY_MAP[cat]
     
-    # Частичное совпадение
-    for key, value in EPC_CATEGORY_MAP.items():
+    # Частичное совпадение (длинные ключи раньше, чтобы 'documentary'
+    # не перекрывался коротким 'doc')
+    for key in sorted(EPG_CATEGORY_MAP, key=len, reverse=True):
         if key in cat:
-            return value
+            return EPG_CATEGORY_MAP[key]
     
     # Если не нашли - возвращаем оригинал
     return cat.capitalize()
@@ -116,19 +117,41 @@ def normalize_channel_name(name):
     return name
 
 def is_russian_channel(extinf_line):
-    line_lower = extinf_line.lower()
-    if re.search(r'tvg-language="[^"]*russian[^"]*"', line_lower):
+    # Поиск без учёта регистра: в источниках атрибуты бывают TVG-Language=...
+    if re.search(r'tvg-language="[^"]*russian[^"]*"', extinf_line, re.IGNORECASE):
         return True
-    if re.search(r'tvg-country="[^"]*(ru|rus)[^"]*"', line_lower):
+    if re.search(r'tvg-country="[^"]*(?:\bru\b|rus)[^"]*"', extinf_line, re.IGNORECASE):
         return True
     return False
 
 def get_channel_name(extinf_line):
-    match = re.search(r',(.*?)$', extinf_line)
-    return match.group(1).strip() if match else "Unknown"
+    """Имя канала — часть строки #EXTINF после разделителя-запятой.
+
+    Запятые могут встречаться внутри значений атрибутов (group-title="a,b"),
+    поэтому сканируем строку с учётом кавычек: разделитель — первая запятая
+    ВНЕ кавычек. Если парные кавычки не закрылись (битые строки вида
+    'tvg-name="X"-1 ...'), делаем откат на последний сегмент после запятой.
+    """
+    in_quotes = False
+    pos = -1
+    for i, ch in enumerate(extinf_line):
+        if ch == '"':
+            in_quotes = not in_quotes
+        elif ch == ',' and not in_quotes:
+            pos = i
+            break
+    if pos == -1:
+        return "Unknown"  # нет разделителя — имя не извлечь
+    name = extinf_line[pos + 1:].strip()
+    if in_quotes or not name:
+        # Кавычки не закрылись или имя пустое — некорректная строка:
+        # берём текст после последней запятой
+        tail = extinf_line.rsplit(',', 1)[-1].strip().strip('"')
+        name = tail if tail else "Unknown"
+    return name
 
 def get_tvg_id(extinf_line):
-    match = re.search(r'tvg-id="([^"]*)"', extinf_line)
+    match = re.search(r'tvg-id="([^"]*)"', extinf_line, re.IGNORECASE)
     return match.group(1).lower().strip() if match else ""
 
 def get_category_from_epg(channel_name, tvg_id, epg_categories):
@@ -184,33 +207,32 @@ def get_category_fallback(name):
     return "📦 Разное"
 
 def fix_extinf(extinf_line, channel_name, epg_categories):
+    """Пересобирает строку #EXTINF корректно: сначала атрибуты, затем
+    имя канала после запятой. Чинит исходный порядок 'атрибуты,-1,имя'."""
     safe_id = re.sub(r'[^a-zа-я0-9]', '', channel_name.lower())
     tvg_id = get_tvg_id(extinf_line)
-    
+
     # Сначала ищем в EPG
     category = get_category_from_epg(channel_name, tvg_id, epg_categories)
-    
+
     # Если не нашли - fallback
     if not category:
         category = get_category_fallback(channel_name)
-    
-    # Добавляем tvg-id
-    if 'tvg-id=' not in extinf_line.lower():
-        extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
-    
-    # Добавляем tvg-name
-    if 'tvg-name=' not in extinf_line.lower():
-        extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
-    
-    # Заменяем group-title
-    if 'group-title=' in extinf_line.lower():
-        extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{category}"', extinf_line)
-    else:
-        extinf_line = re.sub(r'(#EXTINF:[^,]*,)', f'\\1 group-title="{category}" ', extinf_line)
-        if 'group-title=' not in extinf_line:
-            extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: group-title="{category}" ', 1)
-    
-    return extinf_line
+
+    # Извлекаем уже существующие атрибуты (в кавычках — чтобы не захватывать мусор)
+    attrs = {}
+    for key in ("tvg-id", "tvg-name", "tvg-logo", "tvg-language",
+                "tvg-country", "tvg-shift", "group-title"):
+        m = re.search(key + r'="([^"]*)"', extinf_line, re.IGNORECASE)
+        if m and m.group(1):
+            attrs[key] = m.group(1)
+
+    attrs.setdefault("tvg-id", tvg_id or safe_id)
+    attrs["tvg-name"] = channel_name
+    attrs["group-title"] = category
+
+    attr_str = " ".join(f'{k}="{v}"' for k, v in attrs.items() if v)
+    return f"#EXTINF:-1 {attr_str},{channel_name}"
 
 def get_existing_urls():
     urls = set()
@@ -308,6 +330,22 @@ def load_sources(filepath):
                 sources.append({"url": line, "filter_russian": in_auto_section})
     return sources
 
+def fetch_url(url, session=None, timeout=15):
+    """Загрузка URL с повторными попытками и таймаутом на чтение."""
+    getter = session or requests
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = getter.get(url, timeout=(5, timeout))
+            response.raise_for_status()
+            # Явно указываем кодировку, если сервер её не задал
+            if response.encoding == 'ISO-8859-1':
+                response.encoding = response.apparent_encoding or 'utf-8'
+            return response
+        except requests.RequestException as e:
+            last_error = e
+    raise last_error
+
 def is_stub_url(url):
     """Проверка на заведомо нерабочие заглушки (только явные случаи)"""
     url_lower = url.lower()
@@ -321,11 +359,10 @@ def is_stub_url(url):
     ]
     return any(pattern in url_lower for pattern in stub_patterns)
 
-def parse_m3u(url, filter_russian=False, epg_categories=None):
+def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
     print(f" Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
     try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
+        response = fetch_url(url, session=session)
     except requests.RequestException as e:
         print(f"❌ Ошибка загрузки {url}: {e}")
         return []
@@ -348,6 +385,9 @@ def parse_m3u(url, filter_russian=False, epg_categories=None):
                 continue
             if not filter_russian or is_russian_channel(current_extinf):
                 name = get_channel_name(current_extinf)
+                if not name or name == "Unknown":
+                    current_extinf = ""
+                    continue
                 fixed_extinf = fix_extinf(current_extinf, name, epg_categories)
                 channels.append({"extinf": fixed_extinf, "url": line})
             current_extinf = ""
@@ -362,7 +402,10 @@ def main():
     # Загружаем категории из EPG
     print("\n📚 Загрузка категорий из EPG...")
     epg_categories = load_epg_categories()
-    
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; iptv-parser)"})
+
     gh_urls = find_github_playlists()
     update_sources_file(gh_urls)
     sources = load_sources(SOURCES_FILE)
@@ -372,8 +415,13 @@ def main():
     print(f"\n📋 Найдено {len(sources)} источников в {SOURCES_FILE}\n")
     
     all_channels = []
+    seen_urls = set()  # защита от одинаковых ссылок в разных источниках
     for src in sources:
-        channels = parse_m3u(src["url"], filter_russian=src["filter_russian"], epg_categories=epg_categories)
+        if src["url"] in seen_urls:
+            continue
+        seen_urls.add(src["url"])
+        channels = parse_m3u(src["url"], filter_russian=src["filter_russian"],
+                             epg_categories=epg_categories, session=session)
         all_channels.extend(channels)
     print(f"\n Всего каналов до обработки: {len(all_channels)}")
     
@@ -385,7 +433,7 @@ def main():
         name = get_channel_name(ch['extinf'])
         norm_name = normalize_channel_name(name)
         
-        if norm_name not in seen_names:
+        if norm_name and norm_name not in seen_names:
             seen_names.add(norm_name)
             unique_channels.append(ch)
     
