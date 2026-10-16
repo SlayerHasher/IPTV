@@ -65,7 +65,6 @@ def _parse_epg_stream(stream):
     """Потоковый разбор XML EPG без загрузки всего текста в память
     (полный распакованный XML ~300+ МБ — ET.fromstring ловит MemoryError)."""
     categories = {}
-    channel_id = ""
     display_name = ""
     category = ""
     for event, elem in ET.iterparse(stream, events=("end",)):
@@ -74,11 +73,13 @@ def _parse_epg_stream(stream):
         elif elem.tag == "category" and elem.text:
             category = elem.text.strip().lower()
         elif elem.tag == "channel":
-            if channel_id and category:
-                categories[channel_id] = category
+            # id приводим к нижнему регистру: в EPG он может быть с заглавными
+            cid = (elem.get("id") or "").strip().lower()
+            if cid and category:
+                categories[cid] = category
             if display_name and category:
                 categories[display_name] = category
-            channel_id = display_name = category = ""
+            display_name = category = ""
             elem.clear()  # освобождаем память разобранных узлов
     return categories
 
