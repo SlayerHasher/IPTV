@@ -1,14 +1,20 @@
 import requests
 import os
 import re
-import json
 import gzip
+import time
+import hashlib
 import xml.etree.ElementTree as ET
 from io import BytesIO
 
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
 EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
+# Кэш EPG между запусками (в CI можно ускорить дополнительно через actions/cache)
+EPG_CACHE_DIR = ".cache"
+EPG_CACHE_TTL_SECONDS = 6 * 3600  # 6 часов: плейлист пересобирается раз в сутки
+# Максимум AUTO-источников, чтобы время сборки в CI не росло бесконечно
+MAX_AUTO_SOURCES = int(os.environ.get("MAX_AUTO_SOURCES", "15"))
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -31,19 +37,19 @@ EPG_CATEGORY_MAP = {
     'doc': '🌍 Познавательные',
     'lifestyle': '🌿 Природа, Охота, Рыбалка и Дача',
     'outdoor': '🌿 Природа, Охота, Рыбалка и Дача',
-    'religion': ' Религиозные',
+    'religion': '🕍 Религиозные',
     'auto': '🚗 Авто и Мото',
     'moto': '🚗 Авто и Мото',
     'food': '🍳 Еда и Кулинария',
     'cooking': '🍳 Еда и Кулинария',
-    'shopping': '🛍 Шопинг',
+    'shopping': '🛍️ Шопинг',
     'travel': '🌍 Познавательные',
     'science': '🌍 Познавательные',
     'history': '🌍 Познавательные',
     'nature': '🌿 Природа, Охота, Рыбалка и Дача',
-    'hunting': ' Природа, Охота, Рыбалка и Дача',
-    'fishing': ' Природа, Охота, Рыбалка и Дача',
-    'health': ' Здоровье и Медицина',
+    'hunting': '🌿 Природа, Охота, Рыбалка и Дача',
+    'fishing': '🌿 Природа, Охота, Рыбалка и Дача',
+    'health': '💊 Здоровье и Медицина',
     'medical': '💊 Здоровье и Медицина',
     'business': '📰 Новости',
     'finance': '📰 Новости',
@@ -51,44 +57,78 @@ EPG_CATEGORY_MAP = {
     'local': '🏛 Региональные каналы',
 }
 
-def load_epg_categories():
-    """Скачиваем EPG и извлекаем категории каналов"""
-    print("📥 Загрузка и парсинг EPG...")
+def _epg_cache_path():
+    url_hash = hashlib.sha1(EPG_URL.encode("utf-8")).hexdigest()[:12]
+    return os.path.join(EPG_CACHE_DIR, f"epg_{url_hash}.xml.gz")
+
+def _parse_epg_stream(stream):
+    """Потоковый разбор XML EPG без загрузки всего текста в память
+    (полный распакованный XML ~300+ МБ — ET.fromstring ловит MemoryError)."""
     categories = {}
-    
-    try:
-        response = requests.get(EPG_URL, timeout=60)
-        response.raise_for_status()
-        
-        with gzip.GzipFile(fileobj=BytesIO(response.content)) as gz:
-            xml_content = gz.read().decode('utf-8')
-        
-        root = ET.fromstring(xml_content)
-        
-        for channel in root.findall('.//channel'):
-            channel_id = channel.get('id', '').lower().strip()
-            
-            display_name = ""
-            category = ""
-            
-            name_elem = channel.find('display-name')
-            if name_elem is not None and name_elem.text:
-                display_name = name_elem.text.strip().lower()
-            
-            category_elem = channel.find('category')
-            if category_elem is not None and category_elem.text:
-                category = category_elem.text.strip().lower()
-            
+    channel_id = ""
+    display_name = ""
+    category = ""
+    for event, elem in ET.iterparse(stream, events=("end",)):
+        if elem.tag == "display-name" and not display_name and elem.text:
+            display_name = elem.text.strip().lower()
+        elif elem.tag == "category" and elem.text:
+            category = elem.text.strip().lower()
+        elif elem.tag == "channel":
             if channel_id and category:
                 categories[channel_id] = category
             if display_name and category:
                 categories[display_name] = category
-        
+            channel_id = display_name = category = ""
+            elem.clear()  # освобождаем память разобранных узлов
+    return categories
+
+def load_epg_xml_bytes(session=None):
+    """Возвращает СЫРОЙ (сжатый) gz-файл EPG, используя локальный кэш (TTL 6 часов),
+    чтобы не скачивать ~50 МБ при каждом запуске."""
+    cache_path = _epg_cache_path()
+    try:
+        if os.path.exists(cache_path) and \
+           (time.time() - os.path.getmtime(cache_path)) < EPG_CACHE_TTL_SECONDS:
+            print(f"📦 EPG из кэша: {cache_path}")
+            with open(cache_path, "rb") as f:
+                return f.read()
+    except OSError as e:
+        print(f"⚠️ Кэш EPG повреждён, скачиваю заново: {e}")
+
+    getter = session or requests
+    try:
+        response = fetch_url(EPG_URL, session=getter, timeout=120)
+    except Exception as e:
+        # Свежий кэш не успел протухнуть — используем его даже если TTL истёк
+        if os.path.exists(cache_path):
+            print(f"⚠️ EPG недоступен ({type(e).__name__}), использую устаревший кэш")
+            with open(cache_path, "rb") as f:
+                return f.read()
+        raise
+    raw_gz = response.content
+    # В кэш кладём исходный .gz — он компактнее распарсенных данных
+    try:
+        os.makedirs(EPG_CACHE_DIR, exist_ok=True)
+        tmp_path = cache_path + ".tmp"
+        with open(tmp_path, "wb") as f:
+            f.write(raw_gz)
+        os.replace(tmp_path, cache_path)
+    except OSError as e:
+        print(f"⚠️ Не удалось записать кэш EPG: {e}")
+    return raw_gz
+
+def load_epg_categories(session=None):
+    """Скачиваем EPG (или берём из кэша) и извлекаем категории каналов"""
+    print("📥 Загрузка и парсинг EPG...", flush=True)
+    try:
+        raw_gz = load_epg_xml_bytes(session=session)
+        with gzip.GzipFile(fileobj=BytesIO(raw_gz)) as gz:
+            categories = _parse_epg_stream(gz)
+        del raw_gz
         print(f"✅ Извлечено {len(categories)} каналов с категориями из EPG")
         return categories
-        
     except Exception as e:
-        print(f"❌ Ошибка загрузки EPG: {e}")
+        print(f"❌ Ошибка загрузки EPG: {type(e).__name__}: {e}", flush=True)
         return {}
 
 def map_category(epg_category):
@@ -188,21 +228,21 @@ def get_category_fallback(name):
     if any(x in name_lower for x in ['детский', 'kids', 'карусель', 'мульт', 'disney']):
         return "🧸 Детские"
     if any(x in name_lower for x in ['музыка', 'music', 'mtv', 'муз', 'bridge']):
-        return " Музыка"
+        return "🎵 Музыка"
     if any(x in name_lower for x in ['discovery', 'national', 'история', 'history', 'наука', 'travel']):
         return "🌍 Познавательные"
     if any(x in name_lower for x in ['охота', 'рыбалка', 'дача', 'усадьба']):
         return "🌿 Природа, Охота, Рыбалка и Дача"
     if any(x in name_lower for x in ['кухня', 'еда', 'food', 'кулинар']):
-        return " Еда и Кулинария"
+        return "🍳 Еда и Кулинария"
     if any(x in name_lower for x in ['авто', 'auto', 'мото']):
-        return " Авто и Мото"
+        return "🚗 Авто и Мото"
     if any(x in name_lower for x in ['ржд', 'транспорт']):
         return "🚂 Транспорт"
     if any(x in name_lower for x in ['спб', 'регион', 'область', 'кубань', 'сургут', 'самара']):
         return "🏛 Региональные каналы"
     if any(x in name_lower for x in ['первый', 'россия', 'нтв', 'тнт', 'стс']):
-        return " Федеральные и Общие"
+        return "📺 Федеральные и Общие"
     
     return "📦 Разное"
 
@@ -328,7 +368,15 @@ def load_sources(filepath):
                 continue
             if line and not line.startswith("#"):
                 sources.append({"url": line, "filter_russian": in_auto_section})
-    return sources
+    # Ограничиваем число AUTO-источников, чтобы время сборки в CI не росло
+    # бесконечно с каждым новым найденным репозиторием.
+    manual = [s for s in sources if not s["filter_russian"]]
+    auto = [s for s in sources if s["filter_russian"]]
+    if len(auto) > MAX_AUTO_SOURCES:
+        print(f"ℹ️ AUTO-источников {len(auto)}, используется только первые "
+              f"{MAX_AUTO_SOURCES} (задаётся переменной MAX_AUTO_SOURCES)")
+        auto = auto[:MAX_AUTO_SOURCES]
+    return manual + auto
 
 def fetch_url(url, session=None, timeout=15):
     """Загрузка URL с повторными попытками и таймаутом на чтение."""
@@ -344,6 +392,8 @@ def fetch_url(url, session=None, timeout=15):
             return response
         except requests.RequestException as e:
             last_error = e
+            if attempt < 2:
+                time.sleep(2 ** attempt)  # 1с, 2с — не долбим зависающий хост
     raise last_error
 
 def is_stub_url(url):
@@ -359,6 +409,18 @@ def is_stub_url(url):
     ]
     return any(pattern in url_lower for pattern in stub_patterns)
 
+# Протухшие/временные токены доступа: такие ссылки работают несколько часов
+# и у большинства зрителей будут отдавать 403 — в публичном плейлисте бесполезны
+EXPIRING_TOKEN_RE = re.compile(
+    r'(?:[?&](?:token|wmsauthsign|sessionid|session_id|hash|key|k|sign|md5|usertoken)=)'
+    r'|(?:/[a-f0-9]{24,}/?)$',
+    re.IGNORECASE,
+)
+
+def is_expired_token_url(url):
+    """Ссылки с временными токенами (wmsAuthSign, token=...) протухают через часы."""
+    return bool(EXPIRING_TOKEN_RE.search(url))
+
 def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
     print(f" Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
     try:
@@ -371,6 +433,7 @@ def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
         epg_categories = {}
         
     channels = []
+    skipped_tokens = 0
     lines = response.text.splitlines()
     current_extinf = ""
     for line in lines:
@@ -380,8 +443,10 @@ def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
         if line.startswith("#EXTINF:"):
             current_extinf = line
         elif line.startswith("http"):
-            # Пропускаем заглушки
-            if is_stub_url(line):
+            # Пропускаем заглушки и ссылки с протухающими токенами
+            if is_stub_url(line) or is_expired_token_url(line):
+                if is_expired_token_url(line):
+                    skipped_tokens += 1
                 continue
             if not filter_russian or is_russian_channel(current_extinf):
                 name = get_channel_name(current_extinf)
@@ -391,7 +456,8 @@ def parse_m3u(url, filter_russian=False, epg_categories=None, session=None):
                 fixed_extinf = fix_extinf(current_extinf, name, epg_categories)
                 channels.append({"extinf": fixed_extinf, "url": line})
             current_extinf = ""
-    print(f"   ✅ Найдено каналов: {len(channels)}")
+    suffix = f" (пропущено сессий с протухающими токенами: {skipped_tokens})" if skipped_tokens else ""
+    print(f"   ✅ Найдено каналов: {len(channels)}{suffix}", flush=True)
     return channels
 
 def get_category_for_sort(extinf_line):
@@ -399,12 +465,12 @@ def get_category_for_sort(extinf_line):
     return match.group(1) if match else "📦 Разное"
 
 def main():
-    # Загружаем категории из EPG
-    print("\n📚 Загрузка категорий из EPG...")
-    epg_categories = load_epg_categories()
-
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; iptv-parser)"})
+
+    # Загружаем категории из EPG (с локальным кэшем)
+    print("\n📚 Загрузка категорий из EPG...")
+    epg_categories = load_epg_categories(session=session)
 
     gh_urls = find_github_playlists()
     update_sources_file(gh_urls)
@@ -416,10 +482,12 @@ def main():
     
     all_channels = []
     seen_urls = set()  # защита от одинаковых ссылок в разных источниках
-    for src in sources:
+    started = time.time()
+    for idx, src in enumerate(sources, 1):
         if src["url"] in seen_urls:
             continue
         seen_urls.add(src["url"])
+        print(f"[{idx}/{len(sources)}] elapsed {time.time()-started:.0f}s", flush=True)
         channels = parse_m3u(src["url"], filter_russian=src["filter_russian"],
                              epg_categories=epg_categories, session=session)
         all_channels.extend(channels)
