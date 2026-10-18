@@ -14,7 +14,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
 
 # Маппинг категорий из EPG в наши
-EPC_CATEGORY_MAP = {
+EPG_CATEGORY_MAP = {
     'movies': '🎬 Кино и Сериалы',
     'cinema': '🎬 Кино и Сериалы',
     'film': '🎬 Кино и Сериалы',
@@ -31,25 +31,59 @@ EPC_CATEGORY_MAP = {
     'doc': '🌍 Познавательные',
     'lifestyle': '🌿 Природа, Охота, Рыбалка и Дача',
     'outdoor': '🌿 Природа, Охота, Рыбалка и Дача',
-    'religion': ' Религиозные',
+    'religion': '✝️ Религиозные',
     'auto': '🚗 Авто и Мото',
     'moto': '🚗 Авто и Мото',
     'food': '🍳 Еда и Кулинария',
     'cooking': '🍳 Еда и Кулинария',
-    'shopping': '🛍 Шопинг',
+    'shopping': '🛍️ Шопинг',
     'travel': '🌍 Познавательные',
     'science': '🌍 Познавательные',
     'history': '🌍 Познавательные',
     'nature': '🌿 Природа, Охота, Рыбалка и Дача',
-    'hunting': ' Природа, Охота, Рыбалка и Дача',
-    'fishing': ' Природа, Охота, Рыбалка и Дача',
-    'health': ' Здоровье и Медицина',
+    'hunting': '🌿 Природа, Охота, Рыбалка и Дача',
+    'fishing': '🌿 Природа, Охота, Рыбалка и Дача',
+    'health': '💊 Здоровье и Медицина',
     'medical': '💊 Здоровье и Медицина',
     'business': '📰 Новости',
     'finance': '📰 Новости',
-    'regional': '🏛 Региональные каналы',
-    'local': '🏛 Региональные каналы',
+    'education': '🌍 Познавательные',
+    'culture': '🌍 Познавательные',
+    'family': '🧸 Детские',
+    'adult': '🔞 18+',
+    'erotic': '🔞 18+',
+    'xxx': '🔞 18+',
+    'weather': '📺 Федеральные и Общие',
+    'military': '🌍 Познавательные',
+    'war': '🌍 Познавательные',
+    'comedy': '🎬 Кино и Сериалы',
+    'animation': '🧸 Детские',
+    'cartoon': '🧸 Детские',
+    'regional': '🏛️ Региональные каналы',
+    'local': '🏛️ Региональные каналы',
 }
+
+# Порядок вывода категорий в плейлисте (неизвестные — в конце, по алфавиту)
+CATEGORY_ORDER = [
+    '📺 Федеральные и Общие',
+    '📰 Новости',
+    '🎬 Кино и Сериалы',
+    '⚽ Спорт',
+    '🧸 Детские',
+    '🎵 Музыка',
+    '🌍 Познавательные',
+    '🌿 Природа, Охота, Рыбалка и Дача',
+    '🍳 Еда и Кулинария',
+    '🚗 Авто и Мото',
+    '📺 4K / Ultra HD',
+    '🚂 Транспорт',
+    '💊 Здоровье и Медицина',
+    '✝️ Религиозные',
+    '🛍️ Шопинг',
+    '🔞 18+',
+    '🏛️ Региональные каналы',
+    '📦 Разное',
+]
 
 def load_epg_categories():
     """Скачиваем EPG и извлекаем категории каналов"""
@@ -99,15 +133,17 @@ def map_category(epg_category):
     cat = epg_category.lower().strip()
     
     # Точное совпадение
-    if cat in EPC_CATEGORY_MAP:
-        return EPC_CATEGORY_MAP[cat]
+    if cat in EPG_CATEGORY_MAP:
+        return EPG_CATEGORY_MAP[cat]
     
     # Частичное совпадение
-    for key, value in EPC_CATEGORY_MAP.items():
+    for key, value in EPG_CATEGORY_MAP.items():
         if key in cat:
             return value
     
-    # Если не нашли - возвращаем оригинал
+    # Если не нашли - возвращаем оригинал (без category-мусора вроде "Undefined")
+    if cat in ('undefined', 'unknown', 'other', 'no_category'):
+        return None
     return cat.capitalize()
 
 def normalize_channel_name(name):
@@ -144,7 +180,7 @@ def get_category_from_epg(channel_name, tvg_id, epg_categories):
         return map_category(epg_categories[name_lower])
     
     # 3. Частичное совпадение (без HD, FHD и т.д.)
-    clean_name = re.sub(r'\s*(hd|fhd|sd|uhd|4k|2160|1080|720)\s*', '', name_lower).strip()
+    clean_name = re.sub(r'\s*\(?\b(hd|fhd|sd|uhd|4k|2160p?|1080p?|720p?|576p?)\)?\s*', ' ', name_lower).strip()
     if clean_name in epg_categories:
         return map_category(epg_categories[clean_name])
     
@@ -154,32 +190,68 @@ def get_category_fallback(name):
     """Только для каналов, которых нет в EPG"""
     name_lower = name.lower()
     
+    # Точные соответствия известным русскоязычным каналам (исправляют ошибки
+    # ключевых слов, например «Победа» ≠ кулинария, «Еда» ≠ «Разное»)
+    exact_map = {
+        'победа': '🌍 Познавательные',
+        'звезда': '📺 Федеральные и Общие',
+        'красная звезда': '🌍 Познавательные',
+        'военное дело': '🌍 Познавательные',
+        'совершенно секретно': '🌍 Познавательные',
+        'сов. секретно': '🌍 Познавательные',
+        'спас': '✝️ Религиозные',
+        'царьград': '📰 Новости',
+        'родной канал': '📺 Федеральные и Общие',
+        'охотник и рыболов': '🌿 Природа, Охота, Рыбалка и Дача',
+        'первый метео': '🌍 Познавательные',
+        'юмор чп': '📺 Федеральные и Общие',
+        'блокбастер тв': '🎬 Кино и Сериалы',
+        'про блокбастеры': '🎬 Кино и Сериалы',
+        'умняша': '🧸 Детские',
+        'тяни-толки': '🧸 Детские',
+        'еда': '🍳 Еда и Кулинария',
+        'еда .hd': '🍳 Еда и Кулинария',
+        'заканывай дачу': '🌿 Природа, Охота, Рыбалка и Дача',
+    }
+    key = name_lower.strip()
+    if key in exact_map:
+        return exact_map[key]
+    base = re.sub(r'\s*(hd|fhd|sd|uhd|4k|2160p?|1080p?|720p?|576p?)\s*$', '', key).strip()
+    if base in exact_map:
+        return exact_map[base]
+    
     if any(x in name_lower for x in ['4k', '2160', 'uhd']):
         return "📺 4K / Ultra HD"
-    if any(x in name_lower for x in ['кино', 'cinema', 'movie', 'film', 'премьера', 'premiere', 'tv1000']):
+    if any(x in name_lower for x in ['кино', 'cinema', 'movie', 'film', 'премьера', 'premiere', 'tv1000', 'блокбастер', 'комедия', 'драма', 'триллер', 'series', 'сериал']):
         return "🎬 Кино и Сериалы"
-    if any(x in name_lower for x in ['спорт', 'sport', 'матч', 'match', 'футбол', 'хоккей']):
+    if any(x in name_lower for x in ['спорт', 'sport', 'матч', 'match', 'футбол', 'хоккей', 'биатлон', 'теннис', 'бойцовск']):
         return "⚽ Спорт"
-    if any(x in name_lower for x in ['новости', 'news', '24', 'дождь', 'vesti']):
+    if any(x in name_lower for x in ['новости', 'news', 'дождь', 'vesti', 'избиратель', 'рБК', 'rtvi']):
         return "📰 Новости"
-    if any(x in name_lower for x in ['детский', 'kids', 'карусель', 'мульт', 'disney']):
+    if any(x in name_lower for x in ['детский', 'kids', 'карусель', 'мульт', 'disney', 'cartoon', 'анимац', 'тиля', 'tom and jerry', 'nick', 'джелтмуж']):
         return "🧸 Детские"
-    if any(x in name_lower for x in ['музыка', 'music', 'mtv', 'муз', 'bridge']):
-        return " Музыка"
-    if any(x in name_lower for x in ['discovery', 'national', 'история', 'history', 'наука', 'travel']):
+    if any(x in name_lower for x in ['музыка', 'music', 'mtv', 'муз', 'bridge', 'шансон', 'рок', 'jazz']):
+        return "🎵 Музыка"
+    if any(x in name_lower for x in ['discovery', 'national', 'история', 'history', 'наука', 'travel', 'познател', 'документал', 'geographic', 'планета', 'космос', 'вооруж', 'армия', 'военн', 'секретно', 'метеоро', 'погода', 'meteorolog', 'техно', 'машин', 'astral', 'knowledge']):
         return "🌍 Познавательные"
-    if any(x in name_lower for x in ['охота', 'рыбалка', 'дача', 'усадьба']):
+    if any(x in name_lower for x in ['охота', 'рыбалка', 'дача', 'усадьба', 'природа', 'лес', 'садов', 'ферма', 'fish', 'hunt']):
         return "🌿 Природа, Охота, Рыбалка и Дача"
-    if any(x in name_lower for x in ['кухня', 'еда', 'food', 'кулинар']):
-        return " Еда и Кулинария"
-    if any(x in name_lower for x in ['авто', 'auto', 'мото']):
-        return " Авто и Мото"
-    if any(x in name_lower for x in ['ржд', 'транспорт']):
+    if any(x in name_lower for x in ['кухня', 'culinary', 'кулинар', 'food network', 'фуд тв', '24grid', 'еда тв', 'вкусно', 'рецепт', 'шеф', 'chef', 'vegans', 'vegan', '素食']):
+        return "🍳 Еда и Кулинария"
+    if any(x in name_lower for x in ['авто', 'auto', 'мото', 'moto', 'driving', 'дорожное', 'шоссе']):
+        return "🚗 Авто и Мото"
+    if any(x in name_lower for x in ['ржд', 'транспорт', 'автотрек', 'поезд']):
         return "🚂 Транспорт"
-    if any(x in name_lower for x in ['спб', 'регион', 'область', 'кубань', 'сургут', 'самара']):
-        return "🏛 Региональные каналы"
-    if any(x in name_lower for x in ['первый', 'россия', 'нтв', 'тнт', 'стс']):
-        return " Федеральные и Общие"
+    if any(x in name_lower for x in ['спб', 'регион', 'область', 'кубань', 'сургут', 'самара', 'крим', 'казань', 'урал', 'сибирь', 'приморье', 'ханты', 'ялтин', 'белгород', 'липецк', 'воронеж', 'тул']):
+        return "🏛️ Региональные каналы"
+    if any(x in name_lower for x in ['первый', 'россия', 'нтв', 'тнт', 'стс', 'петербург', 'четверт', 'пятый', 'домашн', 'пиатница', 'пятниц', 'звезда', 'мир', 'культура', 'только', 'orange']):
+        return "📺 Федеральные и Общие"
+    if any(x in name_lower for x in ['религ', 'православ', 'вера', 'церковь', 'spas', 'грязь']):
+        return "✝️ Религиозные"
+    if any(x in name_lower for x in ['shop', 'покупка', 'товар', 'галерея', 'telemall', 'quality']):
+        return "🛍️ Шопинг"
+    if any(x in name_lower for x in ['здоров', 'медицин', 'врач', 'доктор', 'health', 'medic']):
+        return "💊 Здоровье и Медицина"
     
     return "📦 Разное"
 
@@ -194,23 +266,64 @@ def fix_extinf(extinf_line, channel_name, epg_categories):
     if not category:
         category = get_category_fallback(channel_name)
     
+    # Извлекаем часть до запятой из строки "#EXTINF:<длительность> <атрибуты>,<имя>"
+    m = re.match(r'#EXTINF:\s*([^,]*),(.*)$', extinf_line, re.DOTALL)
+    if not m:
+        return extinf_line
+    
+    head = m.group(1).strip()
+    
+    # Определяем длительность: если явно указана в начале — берём её, иначе -1
+    dur_m = re.match(r'^(-?\d+(?:\.\d+)?)', head)
+    if dur_m:
+        duration = dur_m.group(1)
+        attrs_part = head[dur_m.end():].strip()
+    else:
+        duration = "-1"
+        attrs_part = head
+    
+    # Разбираем атрибуты корректно; при этом чиним повреждённые строки вида
+    # tvg-name="..."-1 (длительность "прилипла" к значению атрибута)
+    ATTR_RE = r'([A-Za-z0-9_-]+)=(?:"((?:[^"\\]|\\.)*)"|(\S*))'
+    
+    consumed = []
+    for am in re.finditer(ATTR_RE, attrs_part):
+        if am.group(2) is not None:
+            tail_m = re.match(r'-{1,}\d*(?=\s|\Z)', attrs_part[am.end():])
+            if tail_m:
+                consumed.append((am.end(), am.end() + tail_m.end()))
+    
+    # Вырезаем налипшие хвосты длительности из строки атрибутов
+    for s, e in sorted(consumed, reverse=True):
+        attrs_part = attrs_part[:s] + attrs_part[e:]
+    
+    # Пересобираем список атрибутов (очищаем значения от налипших "-1"/"--1")
+    tokens = []
+    for am in re.finditer(ATTR_RE, attrs_part):
+        key = am.group(1)
+        if am.group(2) is not None:
+            value = re.sub(r'-{1,}\d*$', '', am.group(2)).strip()
+            tokens.append(f'{key}="{value}"')
+        else:
+            tokens.append(f'{key}={am.group(3)}')
+    
+    attrs_part = " ".join(tokens)
+    
     # Добавляем tvg-id
-    if 'tvg-id=' not in extinf_line.lower():
-        extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-id="{safe_id}"', 1)
+    if 'tvg-id=' not in attrs_part.lower():
+        attrs_part = f'tvg-id="{safe_id}" {attrs_part}'.strip()
     
     # Добавляем tvg-name
-    if 'tvg-name=' not in extinf_line.lower():
-        extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: tvg-name="{channel_name}"', 1)
+    if 'tvg-name=' not in attrs_part.lower():
+        attrs_part = f'tvg-name="{channel_name}" {attrs_part}'.strip()
     
-    # Заменяем group-title
-    if 'group-title=' in extinf_line.lower():
-        extinf_line = re.sub(r'group-title="[^"]*"', f'group-title="{category}"', extinf_line)
+    # Заменяем/добавляем group-title
+    if 'group-title=' in attrs_part.lower():
+        attrs_part = re.sub(r'group-title="[^"]*"', f'group-title="{category}"', attrs_part)
     else:
-        extinf_line = re.sub(r'(#EXTINF:[^,]*,)', f'\\1 group-title="{category}" ', extinf_line)
-        if 'group-title=' not in extinf_line:
-            extinf_line = extinf_line.replace('#EXTINF:', f'#EXTINF: group-title="{category}" ', 1)
+        attrs_part = f'{attrs_part} group-title="{category}"'.strip()
     
-    return extinf_line
+    return f'#EXTINF:{duration} {attrs_part},{channel_name}'
 
 def get_existing_urls():
     urls = set()
@@ -358,6 +471,13 @@ def get_category_for_sort(extinf_line):
     match = re.search(r'group-title="([^"]*)"', extinf_line)
     return match.group(1) if match else "📦 Разное"
 
+def category_sort_key(category):
+    """Сортировка категорий по заданному порядку; неизвестные — в конец, по алфавиту"""
+    try:
+        return (0, CATEGORY_ORDER.index(category), "")
+    except ValueError:
+        return (1, 0, category)
+
 def main():
     # Загружаем категории из EPG
     print("\n📚 Загрузка категорий из EPG...")
@@ -390,7 +510,7 @@ def main():
             unique_channels.append(ch)
     
     # Сортировка
-    unique_channels.sort(key=lambda x: (get_category_for_sort(x['extinf']), get_channel_name(x['extinf']).lower()))
+    unique_channels.sort(key=lambda x: (category_sort_key(get_category_for_sort(x['extinf'])), get_channel_name(x['extinf']).lower()))
     
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(f'#EXTM3U url-tvg="{EPG_URL}"\n')
