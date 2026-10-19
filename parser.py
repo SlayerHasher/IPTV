@@ -3,12 +3,21 @@ import os
 import re
 import json
 import gzip
+import hashlib
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
 SOURCES_FILE = "play.list"
 OUTPUT_FILE = "playlist.m3u"
 EPG_URL = "https://iptvx.one/epg/epg.xml.gz"
+
+# --- Статистика жизни трансляций (стабильные ссылки) ---
+STABLE_DB_FILE = "stable_streams.json"      # база стабильных ссылок (создаётся автоматически)
+STABLE_PLAYLIST_FILE = "stable.m3u"         # плейлист только из стабильных ссылок
+STABLE_DAYS_MIN = 30                        # минимальный период жизни для отбора в stable.m3u
+STABLE_MISSING_TOLERANCE = 7                # сколько дней подряд ссылка может отсутствовать,
+                                            # прежде чем считаться умершей ("период жизни" фиксируется)
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -434,6 +443,193 @@ def is_stub_url(url):
     ]
     return any(pattern in url_lower for pattern in stub_patterns)
 
+# ============================================================================
+# СТАТИСТИКА ЖИЗНИ ТРАНСЛЯЦИЙ
+# Каждому уникальному URL присваивается стабильный ID (md5). В JSON-базе
+# хранится история наблюдений: когда ссылка появилась, исчезала, вернулась.
+# "Период жизни" — это длительность текущей непрерывной жизни ссылки
+# (от последней точки появления до сегодняшнего дня). Ссылка считается
+# умершей, если отсутствует более STABLE_MISSING_TOLERANCE дней подряд;
+# тогда её период жизни фиксируется в архиве историй.
+# ============================================================================
+
+def stream_id(url):
+    """Стабильный идентификатор трансляции по URL"""
+    return hashlib.md5(url.encode("utf-8")).hexdigest()
+
+def _today():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+def _days_between(d1, d2):
+    a = datetime.strptime(d1, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    b = datetime.strptime(d2, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return (b - a).days
+
+def load_stable_db():
+    if os.path.exists(STABLE_DB_FILE):
+        try:
+            with open(STABLE_DB_FILE, "r", encoding="utf-8") as f:
+                db = json.load(f)
+            if isinstance(db, dict) and isinstance(db.get("streams"), dict):
+                return db
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"⚠️ Не удалось прочитать {STABLE_DB_FILE} ({e}), начинаю новую базу")
+    return {"updated": "", "streams": {}}
+
+def update_stable_db(db, channels):
+    """Обновляет базу по списку каналов, актуальных на сегодня.
+
+    channels: список словарей {"url": ..., "extinf": ...}
+    Возвращает сводку для отчёта.
+    """
+    today = _today()
+    streams = db["streams"]
+    seen_ids = set()
+    new_count = resurrected_count = 0
+
+    for ch in channels:
+        url = ch["url"]
+        sid = stream_id(url)
+        seen_ids.add(sid)
+        rec = streams.get(sid)
+        name = get_channel_name(ch["extinf"])
+        category = get_category_for_sort(ch["extinf"])
+
+        if rec is None:
+            # Новая трансляция: жизнь началась сегодня
+            streams[sid] = {
+                "url": url,
+                "name": name,
+                "category": category,
+                "first_seen": today,
+                "current_birth": today,     # начало текущего непрерывного периода жизни
+                "last_seen": today,
+                "last_miss_start": today,   # потенциальное начало перерыва (если завтра пропадёт)
+                "alive": True,
+                "appearances": 1,           # сколько раз ссылка появлялась (с учётом возвращений)
+                "histories": [],            # завершённые периоды жизни: [{start, end, days}]
+            }
+            new_count += 1
+        else:
+            rec["name"] = name
+            rec["category"] = category
+            if not rec.get("alive", False):
+                # Ссылка вернулась после смерти — начинается новый период жизни
+                rec["alive"] = True
+                rec["current_birth"] = today
+                rec["appearances"] = rec.get("appearances", 0) + 1
+                resurrected_count += 1
+            # Короткие перерывы (в пределах допуска) не прерывают период жизни,
+            # поэтому current_birth при возврате в рамках допуска НЕ сбрасывается
+            rec["last_seen"] = today
+            rec["last_miss_start"] = today
+
+    # Обработка отсутствующих сегодня ссылок
+    dead_now = []
+    for sid, rec in streams.items():
+        if sid in seen_ids or not rec.get("alive", False):
+            continue
+        last_visible = rec.get("last_miss_start") or rec.get("last_seen", today)
+        gap_days = _days_between(last_visible, today)
+        if gap_days > STABLE_MISSING_TOLERANCE:
+            # Пропадание дольше допуска — трансляция мертва, период жизни фиксируется
+            lifetime = _days_between(rec["current_birth"], rec["last_seen"]) + 1
+            rec["histories"].append({
+                "start": rec["current_birth"],
+                "end": rec["last_seen"],
+                "days": lifetime,
+            })
+            rec["alive"] = False
+            dead_now.append((rec.get("name", "?"), lifetime))
+
+    db["updated"] = today
+    alive_now = [r for r in streams.values() if r.get("alive")]
+    return {
+        "total": len(streams),
+        "new": new_count,
+        "dead_now": dead_now,
+        "resurrected": resurrected_count,
+        "alive": len(alive_now),
+    }
+
+def current_lifespan_days(rec):
+    """Текущий период жизни активной ссылки (в днях)"""
+    return _days_between(rec["current_birth"], _today()) + 1
+
+def save_stable_db(db):
+    with open(STABLE_DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False, indent=2)
+    print(f"💾 Статистика жизни трансляций сохранена в {STABLE_DB_FILE}")
+
+def write_stable_playlist(db, channels_by_url):
+    """Формирует stable.m3u: только ссылки, живущие без перерывов >= STABLE_DAYS_MIN дней.
+
+    Период жизни указывается обязательно — в tvg-lifetime (в днях) и в комментарии
+    к каждой записи.
+    """
+    entries = []
+    for rec in db["streams"].values():
+        if not rec.get("alive"):
+            continue
+        lifespan = current_lifespan_days(rec)
+        if lifespan < STABLE_DAYS_MIN:
+            continue
+        extinf = channels_by_url.get(rec["url"])
+        if not extinf:
+            # Ссылка жива, но сегодня не получена из источников (в пределах допуска) —
+            # собираем строку EXTINF из сохранённых данных
+            safe_id = re.sub(r'[^a-zа-я0-9]', '', rec["name"].lower())
+            extinf = (f'#EXTINF:-1 tvg-id="{safe_id}" '
+                      f'tvg-name="{rec["name"]}" group-title="{rec["category"]}",{rec["name"]}')
+        entries.append((lifespan, rec, extinf))
+
+    entries.sort(key=lambda x: (-x[0], x[1]["name"].lower()))
+
+    today = _today()
+    with open(STABLE_PLAYLIST_FILE, "w", encoding="utf-8") as f:
+        f.write(f'#EXTM3U url-tvg="{EPG_URL}"\n')
+        f.write(f"# Стабильные трансляции: период жизни (tvg-lifetime) не менее "
+                f"{STABLE_DAYS_MIN} дней без перерывов.\n")
+        f.write(f"# Обновлено: {today}. Источник данных: {STABLE_DB_FILE}\n")
+        for lifespan, rec, extinf in entries:
+            f.write(f"# LIVE-DAYS: {lifespan} | SINCE: {rec['current_birth']} | "
+                    f"APPEARANCES: {rec.get('appearances', 1)}\n")
+            # Добавляем атрибут tvg-lifetime в строку EXTINF
+            if 'tvg-lifetime=' in extinf.lower():
+                extinf = re.sub(r'tvg-lifetime="[^"]*"', f'tvg-lifetime="{lifespan}"', extinf)
+            else:
+                # Вставляем перед первым незаключённым в кавычки запятым (разделитель attrs/name)
+                m = re.search(r'#EXTINF:[^,]*,', extinf)
+                if m:
+                    pos = m.end() - 1
+                    extinf = extinf[:pos] + f' tvg-lifetime="{lifespan}"' + extinf[pos:]
+            f.write(extinf + "\n")
+            f.write(rec["url"] + "\n")
+    print(f"📄 Сохранено {len(entries)} стабильных трансляций "
+          f"(жизнь >= {STABLE_DAYS_MIN} дней) в {STABLE_PLAYLIST_FILE}")
+
+def print_stability_report(db):
+    """Печатает сводную статистику о жизни трансляций"""
+    alive = [r for r in db["streams"].values() if r.get("alive")]
+    dead = [r for r in db["streams"].values() if not r.get("alive")]
+    if not alive and not dead:
+        return
+    lifespans = sorted((_days_between(r["current_birth"], r["last_seen"]) + 1 for r in alive), reverse=True)
+    print("\n 📊 Статистика жизни трансляций:")
+    print(f"   Активных ссылок в базе: {len(alive)}, мёртвых (в архиве): {len(dead)}")
+    if lifespans:
+        median = lifespans[len(lifespans) // 2]
+        buckets = [(30, ">= 30 дней"), (90, ">= 90 дней"), (180, ">= 180 дней"), (365, ">= 365 дней")]
+        for days_min, label in buckets:
+            n = sum(1 for l in lifespans if l >= days_min)
+            print(f"   Период жизни {label}: {n}")
+        print(f"   Медианный период жизни: {median} дн., максимальный: {lifespans[0]} дн.")
+    if alive:
+        top = sorted(alive, key=current_lifespan_days, reverse=True)[:5]
+        print("   Топ-5 самых долгоживущих ссылок:")
+        for r in top:
+            print(f"     {current_lifespan_days(r):4d} дн. | {r['name'][:40]:40s} | с {r['current_birth']}")
+
 def parse_m3u(url, filter_russian=False, epg_categories=None):
     print(f" Загрузка: {url} {'(с фильтрацией)' if filter_russian else '(без фильтрации)'}")
     try:
@@ -531,6 +727,52 @@ def main():
     print("\n Категории:")
     for cat, count in sorted(categories_count.items(), key=lambda x: x[1], reverse=True):
         print(f"  {cat}: {count}")
+
+    # ===== Статистика жизни трансляций =====
+    print("\n📈 Обновление статистики жизни трансляций...")
+    db = load_stable_db()
+    summary = update_stable_db(db, all_channels)
+    save_stable_db(db)
+
+    channels_by_url = {}
+    for ch in all_channels:
+        channels_by_url.setdefault(ch["url"], ch["extinf"])
+    write_stable_playlist(db, channels_by_url)
+    print_stability_report(db)
+
+    if summary["dead_now"]:
+        print(f"\n💀 Зафиксирована смерть {len(summary['dead_now'])} ссылок "
+              f"(отсутствуют > {STABLE_MISSING_TOLERANCE} дней):")
+        for name, lifetime in summary["dead_now"][:10]:
+            print(f"   {name[:45]:45s} | период жизни: {lifetime} дн.")
+    if summary["new"]:
+        print(f"🆕 Новых трансляций сегодня: {summary['new']}")
+    if summary["resurrected"]:
+        print(f"♻️ Вернувшихся после смерти: {summary['resurrected']}")
+
+    # Сводка для лога GitHub Actions
+    gh_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if gh_summary:
+        alive = [r for r in db["streams"].values() if r.get("alive")]
+        stable_n = sum(1 for r in alive if current_lifespan_days(r) >= STABLE_DAYS_MIN)
+        try:
+            with open(gh_summary, "a", encoding="utf-8") as f:
+                f.write("## 📈 Статистика жизни трансляций\n\n")
+                f.write("| Показатель | Значение |\n|---|---|\n")
+                f.write(f"| Ссылок в базе (всего) | {summary['total']} |\n")
+                f.write(f"| Активных | {summary['alive']} |\n")
+                f.write(f"| Стабильных (жизнь ≥ {STABLE_DAYS_MIN} дн.) | {stable_n} |\n")
+                f.write(f"| Новых сегодня | {summary['new']} |\n")
+                f.write(f"| Умерших сегодня | {len(summary['dead_now'])} |\n")
+                f.write(f"| Вернувшихся после смерти | {summary['resurrected']} |\n")
+                if alive:
+                    best = max(alive, key=current_lifespan_days)
+                    f.write(f"| Рекорд периода жизни | {current_lifespan_days(best)} дн. "
+                            f"({best['name']}) |\n")
+                f.write(f"\nСтабильные ссылки: `{STABLE_PLAYLIST_FILE}` · "
+                        f"Полная база: `{STABLE_DB_FILE}`\n")
+        except OSError:
+            pass
 
 if __name__ == "__main__":
     main()

@@ -34,5 +34,5 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add play.list playlist.m3u
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: auto-update sources and playlist" && git push)
+          git add play.list playlist.m3u stable_streams.json stable.m3u dashboard.html
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: auto-update sources, playlist and stream lifetime stats" && git push)

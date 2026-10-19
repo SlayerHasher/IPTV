@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPTV Dashboard — управление списками</title>
+<style>
+:root{
+  --bg:#0e1420; --panel:#161f30; --panel2:#1d2a42; --border:#28374f;
+  --text:#dbe6f5; --muted:#8aa0bd; --accent:#4da3ff; --green:#3ecf8e;
+  --red:#ff6b6b; --yellow:#ffc94d; --mono:'Consolas','Menlo',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
+header h1{font-size:18px;font-weight:600}
+header h1 span{color:var(--accent)}
+.badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--panel2);color:var(--muted)}
+.spacer{flex:1}
+button,select,input[type=text],input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:13px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#08101c;border-color:var(--accent);font-weight:600}
+button.danger{color:var(--red)}
+nav.tabs{display:flex;gap:4px;padding:10px 20px 0;background:var(--panel);border-bottom:1px solid var(--border)}
+nav.tabs button{border:none;border-radius:8px 8px 0 0;background:transparent;color:var(--muted);padding:10px 18px;font-size:14px}
+nav.tabs button.active{background:var(--bg);color:var(--text);border-top:2px solid var(--accent)}
+main{padding:18px 20px;max-width:1500px;margin:0 auto}
+.tab{display:none}.tab.active{display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px}
+.card .num{font-size:26px;font-weight:700}
+.card .lbl{color:var(--muted);font-size:12px;margin-top:2px}
+.card.green .num{color:var(--green)}.card.red .num{color:var(--red)}.card.blue .num{color:var(--accent)}.card.yellow .num{color:var(--yellow)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar input[type=text]{width:260px;cursor:text}
+table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:10px;overflow:hidden}
+th{background:var(--panel2);color:var(--muted);text-align:left;padding:9px 10px;font-size:12px;text-transform:uppercase;letter-spacing:.4px;cursor:pointer;user-select:none;white-space:nowrap}
+th.sorted::after{content:' ▾';color:var(--accent)} th.sorted.asc::after{content:' ▴';color:var(--accent)}
+td{padding:8px 10px;border-top:1px solid var(--border);vertical-align:top}
+tr:hover td{background:rgba(77,163,255,.06)}
+.urlcell{font-family:var(--mono);font-size:12px;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.urlcell a{color:var(--accent);text-decoration:none}
+.chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;margin-right:4px}
+.chip.alive{background:rgba(62,207,142,.15);color:var(--green)}
+.chip.dead{background:rgba(255,107,107,.15);color:var(--red)}
+.chip.stable{background:rgba(77,163,255,.15);color:var(--accent)}
+.chip.warn{background:rgba(255,201,77,.15);color:var(--yellow)}
+.lifespan-bar{height:5px;border-radius:3px;background:var(--panel2);margin-top:4px;overflow:hidden;width:120px}
+.lifespan-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green))}
+textarea{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;line-height:1.5;resize:vertical}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.panel h2{font-size:15px;margin-bottom:10px;color:var(--accent)}
+.hint{color:var(--muted);font-size:12px;margin:6px 0}
+.rowlist{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.rowlist input[type=text]{flex:1;cursor:text}
+.rowlist .rm{color:var(--red);border-color:transparent;background:transparent;font-size:16px;padding:2px 8px}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+#toast{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:100}
+.toast-item{background:var(--panel2);border:1px solid var(--border);border-left:4px solid var(--accent);padding:10px 16px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.5);animation:in .2s;max-width:380px}
+.toast-item.err{border-left-color:var(--red)}
+.toast-item.ok{border-left-color:var(--green)}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1}}
+.pager{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--muted);font-size:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+details.srcitem summary{cursor:pointer;padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center}
+details.srcitem .cnt{color:var(--muted);font-size:12px}
+.mono{font-family:var(--mono);font-size:12px}
+label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <h1>📡 IPTV <span>Dashboard</span></h1>
+  <span class="badge" id="hdr-updated">не загружено</span>
+  <div class="spacer"></div>
+  <select id="datasetSel" title="Набор данных"></select>
+  <button onclick="loadDataset(document.getElementById('datasetSel').value)">⬇ Загрузить с GitHub</button>
+  <button onclick="openFilePicker()">📂 Открыть файл…</button>
+  <input type="file" id="fileInput" accept=".json,.m3u,.list,.txt" multiple hidden>
+  <button class="primary" onclick="exportAll()">💾 Скачать всё (zip-набор файлов)</button>
+</header>
+
+<nav class="tabs">
+  <button data-tab="overview" class="active">Обзор</button>
+  <button data-tab="streams">Трансляции и жизнь</button>
+  <button data-tab="sources">Источники (play.list)</button>
+  <button data-tab="playlists">Плейлисты (M3U)</button>
+</nav>
+
+<main>
+<!-- ============ ОБЗОР ============ -->
+<section class="tab active" id="tab-overview">
+  <div class="cards" id="ovCards"></div>
+  <div class="grid2">
+    <div class="panel">
+      <h2>Распределение по периоду жизни (активные трансляции)</h2>
+      <div id="ovHist"></div>
+    </div>
+    <div class="panel">
+      <h2>Топ-10 долгоживущих</h2>
+      <table><tbody id="ovTop"></tbody></table>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Недавние события</h2>
+    <div id="ovEvents" class="hint"></div>
+  </div>
+</section>
+
+<!-- ============ ТРАНСЛЯЦИИ ============ -->
+<section class="tab" id="tab-streams">
+  <div class="toolbar">
+    <input type="text" id="stSearch" placeholder="🔍 Поиск по названию или URL…">
+    <select id="stStatus">
+      <option value="">Все статусы</option>
+      <option value="alive">Активные</option>
+      <option value="dead">Умершие</option>
+      <option value="stable">Стабильные (≥30 дн.)</option>
+      <option value="young">Молодые (&lt;30 дн.)</option>
+    </select>
+    <select id="stCat"><option value="">Все категории</option></select>
+    <label class="toggle"><input type="checkbox" id="stChkNoLogo" checked> без логотипа</label>
+    <label class="toggle"><input type="checkbox" id="stChkWithLogo"> с логотипом</label>
+    <div class="spacer"></div>
+    <span class="hint" id="stCount"></span>
+    <button onclick="downloadStableFromDb()">⬇ Скачать stable.m3u из базы</button>
+  </div>
+  <table>
+    <thead><tr>
+      <th data-k="name" class="sorted asc">Канал</th>
+      <th data-k="category">Категория</th>
+      <th>URL потока</th>
+      <th data-k="lifespan">Период жизни</th>
+      <th data-k="first_seen">Первое появление</th>
+      <th data-k="last_seen">Последняя видимость</th>
+      <th data-k="appearances">Появлений</th>
+      <th data-k="status">Статус</th>
+      <th>Действия</th>
+    </tr></thead>
+    <tbody id="stBody"></tbody>
+  </table>
+  <div class="pager">
+    <button onclick="stPage(-1)">← Назад</button>
+    <span id="stPageLbl"></span>
+    <button onclick="stPage(1)">Вперёд →</button>
+    <select id="stPageSize" onchange="state.stPageNum=0;renderStreams()">
+      <option>50</option><option selected>100</option><option>200</option><option>500</option>
+    </select>
+  </div>
+</section>
+
+<!-- ============ ИСТОЧНИКИ ============ -->
+<section class="tab" id="tab-sources">
+  <div class="grid2">
+    <div class="panel">
+      <h2>Ручные источники</h2>
+      <p class="hint">URL'ы плейлистов-источников, добавляемые вручную. Строки вида <span class="mono"># …</span> в файле — комментарии.</p>
+      <div id="srcManual"></div>
+      <div class="rowlist" style="margin-top:8px">
+        <input type="text" id="srcNewUrl" placeholder="https://example.com/playlist.m3u">
+        <button onclick="addSource('manual')">+ Добавить</button>
+      </div>
+      <div class="hint" style="margin-top:10px">Комментарии (сохранятся в начале файла):</div>
+      <textarea id="srcComments" rows="3"></textarea>
+    </div>
+    <div class="panel">
+      <h2>Авто-источники (GitHub Search)</h2>
+      <p class="hint">Находятся скриптом parser.py автоматически. Здесь можно отметить те, что нужно исключить навсегда (они попадут в блок <span class="mono"># EXCLUDED</span>).</p>
+      <div id="srcAutoList" style="max-height:340px;overflow:auto"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Предпросмотр play.list</h2>
+    <textarea id="srcPreview" rows="14" readonly></textarea>
+    <div class="toolbar" style="margin-top:10px">
+      <button class="primary" onclick="downloadText(state.playlistSources,'play.list')">⬇ Скачать play.list</button>
+      <button onclick="copyText(state.playlistSources)">📋 Копировать</button>
+      <button onclick="parsePlayListPrompt()">📥 Импорт из текста play.list</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ПЛЕЙЛИСТЫ ============ -->
+<section class="tab" id="tab-playlists">
+  <div class="toolbar">
+    <select id="plSel">
+      <option value="full">playlist.m3u (полный)</option>
+      <option value="stable">stable.m3u (стабильные)</option>
+      <option value="custom">— пользовательский M3U —</option>
+    </select>
+    <input type="file" id="plFile" accept=".m3u,.txt">
+    <input type="text" id="plSearch" placeholder="🔍 Фильтр по имени / группе / URL…" style="width:280px">
+    <select id="plGroup"><option value="">Все группы</option></select>
+    <div class="spacer"></div>
+    <span class="chip alive" id="plVisible"></span>
+    <button onclick="selectAllInFilter(true)">Выделить все (в фильтре)</button>
+    <button onclick="selectAllInFilter(false)">Снять</button>
+    <button class="danger" onclick="removeSelectedFromPlaylist()">🗑 Удалить выбранные</button>
+    <button class="primary" onclick="downloadCurrentPlaylist()">⬇ Скачать edited.m3u</button>
+  </div>
+  <div class="panel" style="max-height:600px;overflow:auto;padding:0">
+    <table>
+      <thead><tr>
+        <th style="width:34px"><input type="checkbox" id="plHeadChk" onchange="selectAllInFilter(this.checked)"></th>
+        <th style="width:44px">#</th><th>Название</th><th>Группа</th><th>tvg-id</th><th>URL</th>
+      </tr></thead>
+      <tbody id="plBody"></tbody>
+    </table>
+  </div>
+  <p class="hint">Удаление из предпросмотра помечает запись как исключённую — при скачивании edited.m3u её не будет. Исключения хранятся в localStorage и влияют также на генерацию stable.m3u (кнопка во вкладке «Трансляции»).</p>
+</section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ================= СОСТОЯНИЕ ================= */
+const state = {
+  db: null,                 // stable_streams.json
+  fullM3u: "",              // playlist.m3u
+  stableM3u: "",            // stable.m3u
+  sourcesText: "",          // play.list
+  parsed: { manual:[], auto:[], excluded:[], comments:"" },
+  customM3u: null,          // [{extinf,url,name,group,tvgId,logo}]
+  edits: JSON.parse(localStorage.getItem("iptv-edits")||'{"excluded":[]}'), // исключения каналов
+  stSort:{key:"lifespan",asc:false},
+  stPageNum:0,
+};
+function saveEdits(){localStorage.setItem("iptv-edits",JSON.stringify(state.edits));}
+const isExcluded = u => state.edits.excluded.includes(u);
+
+/* ================= УТИЛИТЫ ================= */
+function toast(msg,type=""){const t=document.createElement("div");t.className="toast-item "+type;t.textContent=msg;document.getElementById("toast").appendChild(t);setTimeout(()=>t.remove(),4200);}
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function downloadText(text,name){const b=new Blob([text],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;a.click();URL.revokeObjectURL(a.href);}
+function copyText(t){navigator.clipboard.writeText(t).then(()=>toast("Скопировано в буфер обмена","ok"));}
+function fmtDate(iso){if(!iso)return "—";const d=new Date(iso+"T00:00:00");return d.toLocaleDateString("ru-RU",{day:"2-digit",month:"short",year:"numeric"});}
+function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
+
+/* ================= ЗАГРУЗКА ДАННЫХ ================= */
+// Относительные пути работают при размещении на GitHub Pages и при запуске локального
+// http-сервера в папке репозитория. При открытии file:// используйте кнопку «Открыть файл…».
+const DEFAULT_FILES=["stable_streams.json","play.list","playlist.m3u","stable.m3u"];
+function datasetBase(sel){
+  if(sel==="own"||sel==="") return ""; // файлы рядом с dashboard.html
+  if(sel.startsWith("http")) return sel.endsWith("/")?sel:sel+"/";
+  const m=location.hostname.match(/^([^.]+)\.github\.io$/);
+  let owner=m?m[1]:(location.pathname.split("/")[1]||"USERNAME");
+  return `https://raw.githubusercontent.com/${owner}/${sel}/`;
+}
+function fillDatasetSelect(){
+  const sel=document.getElementById("datasetSel");
+  sel.innerHTML="";
+  const opt=(v,l)=>{const o=document.createElement("option");o.value=v;o.textContent=l;sel.appendChild(o);};
+  opt("own","▶ Файлы рядом с dashboard.html");
+  opt("russian-iptv-generator/main","russian-iptv-generator (main)");
+  opt("custom","🔗 Другой репозиторий / URL…");
+  sel.onchange=()=>{
+    if(sel.value==="custom"){
+      const url=prompt("Владелец/имя_репо или полный URL папки с файлами:");
+      if(!url)return; sel.value=url;
+    }
+    loadDataset(sel.value);
+  };
+}
+async function fetchText(url){const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error(r.status+" "+url);return r.text();}
+async function loadDataset(base){
+  base=datasetBase(base);
+  document.getElementById("hdr-updated").textContent="загрузка…";
+  try{
+    const got={};
+    for(const f of DEFAULT_FILES){
+      try{got[f]=await fetchText(base+f);}catch(e){got[f]=null;}
+    }
+    if(got["stable_streams.json"]===null){
+      toast("Не найден stable_streams.json"+(location.protocol==="file:"?" (при открытии file:// загрузите файлы кнопкой «Открыть файл…»)":": сначала выполните workflow с новой версией parser.py"),"err");
+      return;
+    }
+    ingestData(JSON.parse(got["stable_streams.json"]),got["play.list"]||"",got["stable.m3u"],got["playlist.m3u"]||"");
+    toast("Данные загружены"+(base?": "+base:" (рядом со страницей)"),"ok");
+  }catch(e){toast("Ошибка загрузки: "+e.message,"err");}
+}
+function openFilePicker(){document.getElementById("fileInput").click();}
+document.getElementById("fileInput").addEventListener("change",async ev=>{
+  for(const f of ev.target.files){
+    const txt=await f.text();const n=f.name.toLowerCase();
+    if(n.endsWith(".json")) ingestDb(JSON.parse(txt));
+    else if(n==="play.list"||n.endsWith(".list")|| (n.endsWith(".txt")&&!txt.includes("#EXTINF"))) state.sourcesText=txt;
+    else if(n.startsWith("stable")){state.stableM3u=txt; ingestM3uMeta(txt);}
+    else if(n.endsWith(".m3u")) state.fullM3u=txt;
+  }
+  if(state.db) refreshAll();
+  toast("Файлы загружены","ok");
+  ev.target.value="";
+});
+function ingestM3uMeta(txt){
+  // читаем # LIVE-DAYS / logo из stable.m3u если есть
+}
+function ingestData(db,playListTxt,stableTxt,fullTxt){
+  state.db=db; state.sourcesText=playListTxt; state.stableM3u=stableTxt||""; state.fullM3u=fullTxt;
+  if(!state.stableM3u) state.stableM3u=buildStableFromDb();
+  parsePlayList(playListTxt); refreshAll();
+}
+function ingestDb(db){state.db=db;}
+
+/* ================= СТАБИЛЬНЫЙ ID / LIFE ================= */
+function lifespan(rec){
+  if(!rec.alive){const h=(rec.histories||[]);return h.length?h[h.length-1].days:0;}
+  // активная запись: период жизни от current_birth до даты обновления базы (или last_seen)
+  const ref=(state.db&&state.db.updated)||rec.last_seen||todayISO();
+  return daysBetween(rec.current_birth||rec.first_seen, String(ref)<String(rec.last_seen||ref)?ref:rec.last_seen||ref)+1;
+}
+function histLen(rec){return (rec.histories||[]).length;}
+function todayISO(){return new Date().toISOString().slice(0,10);}
+
+/* ================= РАЗБОР play.list ================= */
+function parsePlayList(txt){
+  const p={manual:[],auto:[],excluded:[],comments:[]};
+  let section="manual";
+  txt.split(/\r?\n/).forEach(line=>{
+    const t=line.trim();
+    if(/^#\s*(AUTO|AUTO SOURCES)/i.test(t)){section="auto";return;}
+    if(/EXCLUDED/i.test(t)&&t.startsWith("#")){section="excluded";return;}
+    if(t.startsWith("http")){(section==="auto"?p.auto:section==="excluded"?p.excluded:p.manual).push(t);return;}
+    if(t.startsWith("#")&&!t.startsWith("#EXT"))p.comments.push(t);
+  });
+  state.parsed={manual:p.manual,auto:p.auto,excluded:p.excluded,comments:p.comments.join("\n")};
+}
+function buildPlayList(){
+  const p=state.parsed;
+  let out=(p.comments||"# Это список источников IPTV.\n# Строки, начинающиеся с #, игнорируются скриптом.")+"\n\n";
+  out+="# --- ВАШИ РУЧНЫЕ ИСТОЧНИКИ ---\n"+p.manual.join("\n")+"\n\n";
+  out+="# --- AUTO SOURCES (GitHub Search) ---\n"+p.auto.join("\n")+"\n";
+  if(p.excluded.length) out+="\n# --- EXCLUDED (ручное исключение dashboard-ом) ---\n"+p.excluded.map(u=>"# "+u).join("\n")+"\n";
+  return out;
+}
+
+/* ================= РЕНДЕР: ОБЗОР ================= */
+function dbRecords(){return Object.values(state.db.streams ?? state.db.records ?? state.db);}
+function computeStats(){
+  const recs=dbRecords();
+  const alive=recs.filter(r=>r.alive), dead=recs.filter(r=>!r.alive);
+  const ls=r=>lifespan(r);
+  const buckets={"1–6 дней":[0,0],"7–29":[0,0],"30–89":[0,0],"90–179":[0,0],"180–364":[0,0],"≥365":[0,0]};
+  const keys=Object.keys(buckets);
+  alive.forEach(r=>{const d=ls(r);
+    const i=d>=365?5:d>=180?4:d>=90?3:d>=30?2:d>=7?1:0; buckets[keys[i]][0]++;});
+  dead.forEach(r=>{const d=ls(r);
+    const i=d>=365?5:d>=180?4:d>=90?3:d>=30?2:d>=7?1:0; buckets[keys[i]][1]++;});
+  const sorted=alive.slice().sort((a,b)=>ls(b)-ls(a));
+  const median=(arr=>{const a=arr.map(ls).sort((x,y)=>x-y);return a.length?a[Math.floor(a.length/2)]:0;})(alive);
+  const recentDied=dead.filter(r=>r.histories&&r.histories.length&&(r.last_seen>=shiftDate(-3)));
+  return {recs,alive,dead,buckets,keys,top:sorted.slice(0,10),median,recentDied,
+          updated:state.db.updated||state.db.generated||(alive[0]&&alive[0].last_seen)||"—",
+          stableN:alive.filter(r=>ls(r)>=30).length};
+}
+function shiftDate(days){const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
+function renderOverview(){
+  const s=computeStats();
+  document.getElementById("hdr-updated").textContent="данные от: "+fmtDate(typeof s.updated==="string"&&s.updated.length===10?s.updated:todayISO());
+  document.getElementById("ovCards").innerHTML=`
+    <div class="card blue"><div class="num">${s.recs.length}</div><div class="lbl">Всего ссылок в базе</div></div>
+    <div class="card green"><div class="num">${s.alive.length}</div><div class="lbl">Активных сейчас</div></div>
+    <div class="card red"><div class="num">${s.dead.length}</div><div class="lbl">Умерших</div></div>
+    <div class="card blue"><div class="num">${s.stableN}</div><div class="lbl">Стабильных (≥30 дн.)</div></div>
+    <div class="card yellow"><div class="num">${s.median}</div><div class="lbl">Медиана жизни, дн.</div></div>`;
+  const max=Math.max(...s.keys.map(k=>Math.max(...s.buckets[k])),1);
+  document.getElementById("ovHist").innerHTML=s.keys.map(k=>{
+    const [a,d]=s.buckets[k];
+    return `<div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+      <span style="width:70px;color:var(--muted);font-size:12px">${k}</span>
+      <div style="flex:1;display:flex;gap:2px;align-items:center">
+        <i style="display:block;height:16px;width:${a/max*100}%;background:var(--green);border-radius:3px"></i>
+        <i style="display:block;height:16px;width:${d/max*100}%;background:var(--red);border-radius:3px"></i>
+      </div>
+      <span class="mono" style="width:70px;font-size:12px">${a} живых · ${d} мёртв</span></div>`;}).join("");
+  document.getElementById("ovTop").innerHTML=s.top.map(r=>`<tr>
+      <td>${esc(r.name)}</td><td class="mono" style="color:var(--muted)">${esc(r.category)}</td>
+      <td><b style="color:var(--green)">${lifespan(r)} дн.</b></td><td class="hint">${fmtDate(r.current_birth)}</td></tr>`).join("")||`<tr><td class="empty">нет активных</td></tr>`;
+  document.getElementById("ovEvents").innerHTML = s.recentDied.length
+    ? "За последние 3 дня объявлены умершими:<br>"+s.recentDied.map(r=>`<span class="chip dead">✝ ${esc(r.name)} (${lifespan(r)} дн.)</span>`).join(" ")
+    : "Недавних смертей трансляций нет. База обновляется ежедневно workflow'ом.";
+}
+
+/* ================= РЕНДЕР: ТРАНСЛЯЦИИ ================= */
+function streamRows(){
+  const q=document.getElementById("stSearch").value.toLowerCase();
+  const st=document.getElementById("stStatus").value;
+  const cat=document.getElementById("stCat").value;
+  const noL=document.getElementById("stChkNoLogo").checked&&!document.getElementById("stChkWithLogo").checked;
+  const withL=document.getElementById("stChkWithLogo").checked;
+  let rows=dbRecords().map(r=>({...r,lifespan:lifespan(r)}));
+  if(q)rows=rows.filter(r=>(r.name||"").toLowerCase().includes(q)||(r.url||"").toLowerCase().includes(q));
+  if(st==="alive")rows=rows.filter(r=>r.alive);
+  if(st==="dead")rows=rows.filter(r=>!r.alive);
+  if(st==="stable")rows=rows.filter(r=>r.alive&&r.lifespan>=30);
+  if(st==="young")rows=rows.filter(r=>r.alive&&r.lifespan<30);
+  if(cat)rows=rows.filter(r=>r.category===cat);
+  if(noL)rows=rows.filter(r=>!r.logo);
+  if(withL)rows=rows.filter(r=>!!r.logo);
+  const {key,asc}=state.stSort;
+  rows.sort((a,b)=>{let x=a[key]??"",y=b[key]??"";
+    if(key==="status"){x=a.alive?1:0;y=b.alive?1:0;}
+    return (typeof x==="number"&&typeof y==="number"?x-y:String(x).localeCompare(String(y),"ru"))*(asc?1:-1);});
+  return rows;
+}
+function renderStreams(){
+  const cats=[...new Set(dbRecords().map(r=>r.category).filter(Boolean))].sort();
+  const catSel=document.getElementById("stCat");
+  if(catSel.options.length<=1) cats.forEach(c=>catSel.add(new Option(c,c)));
+  const rows=streamRows();
+  const size=+document.getElementById("stPageSize").value;
+  const pages=Math.max(1,Math.ceil(rows.length/size));
+  state.stPageNum=Math.min(state.stPageNum,pages-1);
+  const slice=rows.slice(state.stPageNum*size,(state.stPageNum+1)*size);
+  const maxLife=Math.max(...rows.map(r=>r.lifespan),1);
+  document.getElementById("stBody").innerHTML=slice.map(r=>{
+    const excl=isExcluded(r.url);
+    const chips=(r.alive?(r.lifespan>=30?'<span class="chip stable">стабильная</span>':'<span class="chip warn">молодая</span>'):'<span class="chip dead">умерла</span>')
+      +(excl?' <span class="chip dead">исключена</span>':"");
+    return `<tr>
+      <td><b>${r.logo?'<img src="'+esc(r.logo)+'" style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:6px" onerror="this.style.display=\'none\'">':""}${esc(r.name)}</b></td>
+      <td class="hint">${esc(r.category)}</td>
+      <td class="urlcell"><a href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(r.url)}">${esc(r.url)}</a></td>
+      <td><b>${r.lifespan}</b> дн.<div class="lifespan-bar"><i style="width:${r.lifespan/maxLife*100}%"></i></div></td>
+      <td class="hint">${fmtDate(r.current_birth||r.first_seen)}</td>
+      <td class="hint">${fmtDate(r.last_seen)}</td>
+      <td class="hint">${r.appearances||1}${histLen(r)?' <span class="chip warn" title="возвращалась после смерти: '+histLen(r)+' заверш. периодов">↺'+histLen(r)+"</span>":""}</td>
+      <td>${chips}</td>
+      <td style="white-space:nowrap">
+        <button title="Копировать URL" onclick="copyText(${JSON.stringify(r.url).replace(/"/g,'&quot;')})">📋</button>
+        <button title="Показать историю периодов жизни" onclick="showHistory('${esc(r.id||r.url)}')">🕰</button>
+        <button class="${excl?'':'danger'}" title="${excl?'Вернуть в плейлисты':'Исключить из плейлистов'}" onclick="toggleExclude('${esc(r.url)}')">${excl?"↩":"🚫"}</button>
+      </td></tr>`;}).join("")||`<tr><td colspan="9" class="empty">Ничего не найдено</td></tr>`;
+  document.getElementById("stCount").textContent=rows.length+" записей";
+  document.getElementById("stPageLbl").textContent=` стр. ${state.stPageNum+1}/${pages}`;
+}
+function stPage(d){state.stPageNum+=d;renderStreams();}
+document.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
+  const k=th.dataset.k;
+  if(state.stSort.key===k)state.stSort.asc=!state.stSort.asc;else{state.stSort.key=k;state.stSort.asc=false;}
+  document.querySelectorAll("th[data-k]").forEach(t=>t.classList.remove("sorted","asc"));
+  th.classList.add("sorted");if(state.stSort.asc)th.classList.add("asc");
+  renderStreams();});
+["stSearch","stStatus","stCat","stChkNoLogo","stChkWithLogo"].forEach(id=>document.getElementById(id).addEventListener("input",()=>{state.stPageNum=0;renderStreams();}));
+
+function showHistory(idOrUrl){
+  const recs=dbRecords();
+  const r=recs.find(x=>x.id===idOrUrl||x.url===idOrUrl);
+  if(!r)return;
+  const lines=[`Канал: ${r.name}`,`URL: ${r.url}`,`Первое появление: ${fmtDate(r.first_seen)}`,`Текущий период: с ${fmtDate(r.current_birth||r.first_seen)} (${lifespan(r)} дн., ${r.alive?"активен":"завершён"})`,
+    "Завершённые периоды жизни:",...(r.histories||[]).map(h=>`  • ${fmtDate(h.start)} → ${fmtDate(h.end)} = ${h.days} дн.`)];
+  alert(lines.join("\n"));
+}
+function toggleExclude(url){
+  const i=state.edits.excluded.indexOf(url);
+  if(i<0){state.edits.excluded.push(url);toast("Канал исключён из плейлистов","ok");}
+  else{state.edits.excluded.splice(i,1);toast("Канал возвращён","ok");}
+  saveEdits();renderStreams();renderPlaylists();
+}
+
+/* ================= ГЕНЕРАЦИЯ STABLE.M3U ================= */
+function buildStableFromDb(){
+  const recs=dbRecords().filter(r=>r.alive&&lifespan(r)>=30&&!isExcluded(r.url));
+  recs.sort((a,b)=>lifespan(b)-lifespan(a));
+  let out=`#EXTM3U\n# Стабильные ссылки: трансляции, чей непрерывный период жизни >= 30 дней.\n# Обновлено: ${todayISO()} · сгенерировано dashboard.html\n`;
+  for(const r of recs){
+    const attrs=[r["tvg-id"]?`tvg-id="${r["tvg-id"]}"`:r.tvg_id?`tvg-id="${r.tvg_id}"`:"",
+      r.name?`tvg-name="${r.name.replace(/"/g,"'")}"`:"",
+      `group-title="${(r.category||"Разное").replace(/"/g,"'")}"`,
+      r.logo?`tvg-logo="${r.logo}"`:"",`tvg-lifetime="${lifespan(r)}"`].filter(Boolean).join(" ");
+    out+=`# LIVE-DAYS: ${lifespan(r)} | SINCE: ${r.current_birth||r.first_seen} | APPEARANCES: ${r.appearances||1}\n`;
+    out+=`#EXTINF:-1 ${attrs},${r.name}\n${r.url}\n`;
+  }
+  return out;
+}
+function downloadStableFromDb(){downloadText(buildStableFromDb(),"stable.m3u");toast("stable.m3u собран из базы с учётом исключений","ok");}
+
+/* ================= РЕНДЕР: ИСТОЧНИКИ ================= */
+function renderSources(){
+  const p=state.parsed;
+  document.getElementById("srcComments").value=p.comments;
+  const mkRow=(u,i,arr)=>`<div class="rowlist"><input type="text" value="${esc(u)}" onchange="state.parsed.${arr}[${i}]=this.value;refreshSrcPreview()"><button class="rm" onclick="state.parsed.${arr}.splice(${i},1);renderSources()">✕</button></div>`;
+  document.getElementById("srcManual").innerHTML=p.manual.map((u,i)=>mkRow(u,i,"manual")).join("")||'<p class="hint">Список пуст</p>';
+  document.getElementById("srcAutoList").innerHTML=p.auto.map(u=>`<label class="rowlist" style="margin:0">
+      <input type="checkbox" ${p.excluded.includes(u)?"checked":""} onchange="toggleAutoExcl('${esc(u)}',this.checked)">
+      <span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</span></label>`).join("")||'<p class="hint">Авто-источники появятся после первого запуска workflow</p>';
+  refreshSrcPreview();
+}
+function toggleAutoExcl(u,chk){
+  const p=state.parsed;
+  if(chk){if(!p.excluded.includes(u))p.excluded.push(u);}else p.excluded=p.excluded.filter(x=>x!==u);
+  renderSources();
+}
+function addSource(kind){
+  const inp=document.getElementById("srcNewUrl");const v=inp.value.trim();
+  if(!v.startsWith("http"))return toast("Введите корректный http(s) URL","err");
+  state.parsed.manual.push(v);inp.value="";renderSources();toast("Источник добавлен","ok");
+}
+function refreshSrcPreview(){
+  state.parsed.comments=document.getElementById("srcComments").value;
+  state.playlistSources=buildPlayList();
+  document.getElementById("srcPreview").value=state.playlistSources;
+}
+function parsePlayListPrompt(){
+  const t=document.getElementById("srcPreview").value||prompt("Вставьте содержимое play.list:");
+  if(!t)return;parsePlayList(t);renderSources();toast("play.list импортирован","ok");
+}
+
+/* ================= РЕНДЕР: ПЛЕЙЛИСТЫ ================= */
+function parseM3u(txt){
+  const out=[];let cur=null;let idx=0;
+  txt.split(/\r?\n/).forEach(line=>{
+    line=line.trim();
+    if(line.startsWith("#EXTINF")){
+      const name=(line.match(/,(.*)$/)||["",""])[1];
+      const g=(line.match(/group-title="([^"]*)"/)||[,""])[1];
+      const tid=(line.match(/tvg-id="([^"]*)"/)||[,""])[1];
+      const logo=(line.match(/tvg-logo="([^"]*)"/)||[,""])[1];
+      cur={idx:++idx,name,group:g,tvgId:tid,logo,line};
+    }else if(line&&!line.startsWith("#")&&cur){cur.url=line;out.push(cur);cur=null;}
+    else if(/^https?:/.test(line)){out.push({idx:++idx,name:"(без имени)",group:"",tvgId:"",logo:"",url:line,line:null});}
+  });
+  return out;
+}
+function currentPlItems(){
+  const sel=document.getElementById("plSel").value;
+  if(sel==="custom")return state.customM3u||[];
+  const txt=sel==="stable"?(state.stableM3u||buildStableFromDb()):state.fullM3u;
+  return parseM3u(txt||"");
+}
+function renderPlaylists(){
+  const items=currentPlItems();
+  const gsel=document.getElementById("plGroup");
+  const groups=[...new Set(items.map(i=>i.group).filter(Boolean))].sort();
+  if(gsel.options.length<=1)groups.forEach(g=>gsel.add(new Option(g,g)));
+  const q=document.getElementById("plSearch").value.toLowerCase();
+  const g=gsel.value;
+  const filtered=items.filter(i=>(!q||((i.name||"")+(i.url||"")+(i.group||"")).toLowerCase().includes(q))&&(!g||i.group===g));
+  document.getElementById("plVisible").textContent="показано: "+filtered.length+" / "+items.length;
+  document.getElementById("plBody").innerHTML=filtered.slice(0,800).map(i=>{
+    const ex=i.url&&isExcluded(i.url);
+    return `<tr style="${ex?"opacity:.45":""}">
+      <td><input type="checkbox" class="plChk" data-url="${esc(i.url||"")}" ${ex?"checked":""}></td>
+      <td class="hint">${i.idx}</td><td>${i.logo?'<img src="'+esc(i.logo)+'" style="width:20px;height:20px;object-fit:contain;margin-right:6px" onerror="this.style.display=\'none\'">':''}${esc(i.name)}</td>
+      <td class="hint">${esc(i.group)}</td><td class="mono hint">${esc(i.tvgId)}</td>
+      <td class="urlcell"><a href="${esc(i.url)}" target="_blank">${esc(i.url)}</a></td></tr>`;}).join("")
+    +(filtered.length>800?'<tr><td colspan="6" class="hint">…показаны первые 800, уточните фильтр</td></tr>':"")
+    ||'<tr><td colspan="6" class="empty">Нет данных — загрузите набор или откройте файл</td></tr>';
+}
+function selectAllInFilter(v){document.querySelectorAll(".plChk").forEach(c=>c.checked=v);}
+function removeSelectedFromPlaylist(){
+  const urls=[...document.querySelectorAll(".plChk:checked")].map(c=>c.dataset.url).filter(Boolean);
+  if(!urls.length)return toast("Ничего не выбрано","err");
+  urls.forEach(u=>{if(!isExcluded(u))state.edits.excluded.push(u);});
+  saveEdits();renderPlaylists();renderStreams();
+  toast(`Помечено как исключённое: ${urls.length}. Скачайте edited.m3u или stable.m3u.`,"ok");
+}
+function downloadCurrentPlaylist(){
+  const sel=document.getElementById("plSel").value;
+  if(sel==="stable"){downloadStableFromDb();return;}
+  const items=currentPlItems().filter(i=>!(i.url&&isExcluded(i.url)));
+  const txt="#EXTM3U\n"+items.map(i=>(i.line?i.line+"\n":"#EXTINF:-1,"+i.name+"\n")+i.url).join("\n")+"\n";
+  downloadText(txt,"edited.m3u");toast("edited.m3u скачан ("+items.length+" каналов)","ok");
+}
+["plSel","plSearch","plGroup"].forEach(id=>document.getElementById(id).addEventListener("input",renderPlaylists));
+document.getElementById("plFile").addEventListener("change",async ev=>{
+  const f=ev.target.files[0];if(!f)return;
+  state.customM3u=parseM3u(await f.text());
+  document.getElementById("plSel").value="custom";renderPlaylists();toast("Загружен пользовательский M3U: "+f.name,"ok");
+});
+
+/* ================= ЭКСПОРТ ВСЕГО ================= */
+function exportAll(){
+  if(!state.db)return toast("Сначала загрузите stable_streams.json","err");
+  refreshSrcPreview();
+  downloadText(JSON.stringify(state.db,null,2).replace(/[\u0080-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0")),"stable_streams.json");
+  setTimeout(()=>downloadText(buildStableFromDb(),"stable.m3u"),300);
+  setTimeout(()=>downloadText(state.playlistSources,"play.list"),600);
+  toast("Скачаны stable_streams.json + stable.m3u + play.list. Закоммитьте их в репозиторий.","ok");
+}
+
+/* ================= ТАБЫ / INIT ================= */
+document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");document.getElementById("tab-"+b.dataset.tab).classList.add("active");
+});
+function refreshAll(){
+  if(!state.db){document.getElementById("ovCards").innerHTML='<div class="card"><div class="lbl">Нет данных. Загрузите набор данных кнопкой сверху или откройте stable_streams.json локально.</div></div>';return;}
+  renderOverview();renderStreams();renderSources();renderPlaylists();
+}
+fillDatasetSelect();
+// автозагрузка файлов, лежащих рядом со страницей (GitHub Pages / локальный http-сервер)
+if(location.protocol!=="file:") loadDataset("own"); else refreshAll();
+</script>
+</body>
+</html>
