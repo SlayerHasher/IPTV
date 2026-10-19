@@ -1,3 +1,5 @@
+import sys
+import time
 import requests
 import os
 import re
@@ -601,6 +603,20 @@ SUBSCRIPTION_URL_MAX_BODY = 65536      # сколько байт ответа ч
 STREAM_CHECK_CACHE_FILE = "stream_check_cache.json"
 STREAM_CHECK_CACHE_TTL_DAYS = 14       # «ок»-вердикты протухают через N дней
                                        # (заглушка может появиться позже)
+# --- Рассрочка проверок между прогонами -------------------------------------
+# Каналов тысячи, а GitHub Actions имеет лимиты по времени/трафику CI, поэтому
+# дорогая кадровая проверка не обязана завершаться за один прогон. Очередь
+# непроверенных ссылок хранится в файле stream_check_queue.json (коммитится),
+# каждый прогон проверяет ровно STUB_FRAME_CHECK_BUDGET ссылок из головы
+# очереди, результаты кэшируются — полная ревизия всех каналов проходит за
+# несколько дней, без повторной работы и без перерасхода бюджета.
+STUB_FRAME_CHECK_BUDGET = int(os.environ.get("STUB_FRAME_CHECK_BUDGET", "300"))
+HTTP_ONLY_CHECK_BUDGET = int(os.environ.get("HTTP_ONLY_CHECK_BUDGET", "1500"))
+STREAM_CHECK_QUEUE_FILE = "stream_check_queue.json"
+STREAM_CHECK_TIME_BUDGET_S = float(os.environ.get("STUB_CHECK_TIME_BUDGET_S", "600"))
+# Кадровый анализ пропускается для заведомо «живых» HLS-плейлистов (.m3u8):
+# там контент — текстовые сегменты, а не видео; заставка видна только в .ts.
+STUB_SKIP_EXTS = ('.m3u8', '.mpd')
 
 # Признаки «не видео» в HTTP-ответе
 SUBS_HTTP_CODES = {402, 403, 451}      # Payment Required / Forbidden / Legal
@@ -981,88 +997,238 @@ def check_stream_http(url):
     return None
 
 
-# Сколько потоков за прогон проверять «дорогим» кадровым анализом (CI-бюджет).
-STUB_FRAME_CHECK_BUDGET = int(os.environ.get("STUB_FRAME_CHECK_BUDGET", "300"))
-# Кадровый анализ пропускается для заведомо «живых» HLS-плейлистов (.m3u8):
-# там контент — текстовые сегменты, а не видео; заставка видна только в .ts.
-STUB_SKIP_EXTS = ('.m3u8', '.mpd')
-
-
 def _needs_frame_check(url):
     u = url.lower().split('?', 1)[0]
     return not any(u.endswith(ext) for ext in STUB_SKIP_EXTS)
 
 
-def check_stream_url_full(url, cache, budget_left):
-    """Полная проверка одного URL с учётом кэша между прогонами.
-    Возвращает (verdict_or_None, checked_bool)."""
+# Статистика последней проверки потоков (для сводки GitHub Actions)
+LAST_STREAM_CHECK_STATS = None
+
+# --- Очередь проверок (рассрочка дорогих проверок между прогонами CI) --------
+def load_stream_check_queue():
+    try:
+        with open(STREAM_CHECK_QUEUE_FILE, encoding='utf-8') as f:
+            q = json.load(f)
+        if isinstance(q, list):
+            return q
+    except Exception:
+        pass
+    return []
+
+
+def save_stream_check_queue(queue):
+    tmp = STREAM_CHECK_QUEUE_FILE + ".tmp"
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(queue, f, ensure_ascii=False, separators=(',', ':'))
+    os.replace(tmp, STREAM_CHECK_QUEUE_FILE)
+
+
+def _ok_age_days(cache, key, now):
+    ts = cache["ok"].get(key)
+    if isinstance(ts, dict):
+        ts = ts.get("d")
+    if not ts:
+        return 10_000
+    try:
+        d = datetime.strptime(ts, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        return (now - d).days
+    except ValueError:
+        return 10_000
+
+
+def check_stream_url_full(url, cache, mode="full"):
+    """Проверка одного URL с учётом кэша между прогонами.
+    mode="full" — HTTP + кадровый анализ (голова очереди); результат — полный
+                  «ok» ({d: сегодня, f:1}) или вердикт «заглушка»;
+    mode="http" — только дешёвый HTTP-уровень (хвост очереди: ловит 403/страницы
+                  сразу; если чисто — частичный «ok» {f:0}, кадровая проверка
+                  будет позже, когда ссылка дойдёт до головы очереди).
+    Возвращает (verdict_or_None, frame_checked_bool)."""
     key = hashlib.md5(url.encode()).hexdigest()
     now = datetime.now(timezone.utc)
     today = now.strftime('%Y-%m-%d')
     cached_bad = cache["bad"].get(key)
     if cached_bad:
         return cached_bad.get("reason", "ранее помечен как заглушка"), False
-    ok_ts = cache["ok"].get(key)
-    fresh_ok = False
-    if ok_ts:
-        try:
-            age = (now - datetime.strptime(ok_ts, '%Y-%m-%d')).days
-            fresh_ok = age < STREAM_CHECK_CACHE_TTL_DAYS
-        except ValueError:
-            fresh_ok = False
-    # 1) дешёвый HTTP-уровень
+    entry = cache["ok"].get(key)
+    full_ok = bool(entry.get("f")) if isinstance(entry, dict) else bool(entry)
+    fresh_full = full_ok and _ok_age_days(cache, key, now) < STREAM_CHECK_CACHE_TTL_DAYS
+    # 1) дешёвый HTTP-уровень — всегда (быстро, ловит 403/страницы/текст-заглушки)
     verdict = check_stream_http(url)
     if verdict:
         cache["bad"][key] = {"url": url, "reason": verdict, "since": today}
+        cache["ok"].pop(key, None)
         return verdict, True
-    # 2) дорогой кадровый уровень — только если бюджет позволяет и URL похож на поток
-    if STUB_VIDEO_CHECK and budget_left > 0 and _needs_frame_check(url):
-        if not fresh_ok:
+    # 2) дорогой кадровый уровень — только в полном режиме
+    if mode == "full":
+        frame_done = True
+        if STUB_VIDEO_CHECK and _needs_frame_check(url) and not fresh_full:
             verdict = detect_video_stub(url)
             if verdict:
                 cache["bad"][key] = {"url": url, "reason": verdict, "since": today}
+                cache["ok"].pop(key, None)
                 return verdict, True
-    cache["ok"][key] = today
-    return None, True
+        cache["ok"][key] = {"d": today, "f": 1 if frame_done else 0}
+        return None, (frame_done and not fresh_full
+                      and STUB_VIDEO_CHECK and _needs_frame_check(url))
+    # режим http: частичный вердикт (дату первой проверки сохраняем)
+    d = entry.get("d") if isinstance(entry, dict) else today
+    cache["ok"][key] = {"d": d or today, "f": 0}
+    return None, False
 
 
 def filter_subscription_streams(channels):
-    """Параллельная живая проверка потоков: удаляет каналы, у которых вместо
-    трансляции сервер отдаёт страницу/заставку «нужна подписка».
-    Два уровня: HTTP-код/контент + анализ кадров самого видео."""
+    """Живая проверка потоков: удаляет каналы, у которых вместо трансляции
+    сервер отдаёт страницу/заставку «нужна подписка».
+    Два уровня: HTTP-код/контент + анализ кадров самого видео.
+
+    Рассрочка между прогонами (лимиты GitHub Actions на время/трафик CI):
+      • дорогих кадровых проверок за прогон — не больше STUB_FRAME_CHECK_BUDGET;
+      • дешёвых HTTP-проверок хвоста — не больше HTTP_ONLY_CHECK_BUDGET;
+      • временной потолок прогона — STREAM_CHECK_TIME_BUDGET_S секунд;
+      • постоянная FIFO-очередь всех непроверенных ссылок хранится в
+        stream_check_queue.json (коммитится); новые источники — в конец;
+      • вердикты кэшируются (stream_check_cache.json): «bad» не перепроверяется
+        вовсе, полный «ok» протухает через STREAM_CHECK_CACHE_TTL_DAYS дней и
+        возвращается в очередь ротации.
+    Полная ревизия тысяч каналов проходит за несколько ежедневных прогонов,
+    без превышения лимитов и без повторной работы."""
+    global LAST_STREAM_CHECK_STATS
     if not SUBSCRIPTION_URL_CHECK or not channels:
         return channels
     cache = load_stream_check_cache()
     urls = sorted({ch["url"] for ch in channels})
-    # URL уже известные «плохими» из кэша — без сети
+    urlset = set(urls)
     reasons = {}
-    to_check = []
+    live = []                       # ссылки без подтверждённой заглушки
     for u in urls:
         key = hashlib.md5(u.encode()).hexdigest()
         if key in cache["bad"]:
             reasons[u] = cache["bad"][key].get("reason", "заглушка (кэш)")
         else:
-            to_check.append(u)
-    print(f"   🩺 Проверка потоков: {len(urls)} уникальных ссылок "
-          f"(из кэша известно «заглушек»: {len(reasons)}, проверяем: {len(to_check)})...")
-    budget = STUB_FRAME_CHECK_BUDGET
-    checked = 0
-    with ThreadPoolExecutor(max_workers=SUBSCRIPTION_URL_CONCURRENCY) as pool:
-        futures = {}
-        for u in to_check:
-            take = budget > 0
-            if take:
-                budget -= 1
-            futures[pool.submit(check_stream_url_full, u, cache, take)] = u
-        for fut in as_completed(futures):
-            verdict, was_checked = fut.result()
-            if was_checked:
-                checked += 1
-            if verdict:
-                reasons[futures[fut]] = verdict
+            live.append(u)
+
+    now = datetime.now(timezone.utc)
+
+    def _fresh_full_ok(u):
+        """Ссылка недавно проверена кадрами и признана живой → в работе не нужд."""
+        entry = cache["ok"].get(hashlib.md5(u.encode()).hexdigest())
+        if not entry:
+            return False
+        if isinstance(entry, dict):
+            if not entry.get("f"):
+                return False
+            return _ok_age_days(cache, hashlib.md5(u.encode()).hexdigest(),
+                                now) < STREAM_CHECK_CACHE_TTL_DAYS
+        return True                 # старый формат: считаем полным ok
+
+    old_q = load_stream_check_queue()
+    pos = {u: i for i, u in enumerate(old_q)}
+    INFINITY = len(old_q) + len(urls) + 1
+    # Очередь = все живые ссылки, которым нужна работа (нет вердикта / неполный
+    # или протухший ok). Порядок: старая позиция → новые в конец (FIFO).
+    queue = sorted((u for u in live if not _fresh_full_ok(u)),
+                   key=lambda u: pos.get(u, INFINITY))
+    work = queue[:STUB_FRAME_CHECK_BUDGET]                         # кадры+HTTP
+    tail = queue[STUB_FRAME_CHECK_BUDGET:][:HTTP_ONLY_CHECK_BUDGET]  # HTTP-only
+    untouched = queue[STUB_FRAME_CHECK_BUDGET + HTTP_ONLY_CHECK_BUDGET:]
+
+    print(f"   🩺 Проверка потоков: уникальных ссылок {len(urls)}, "
+          f"«заглушки» из кэша без сети: {len(reasons)}, "
+          f"живых без свежего полного «ok»: {len(queue)}")
+    print(f"      ├ полная (кадровая) проверка сегодня: {len(work)} из них "
+          f"(потолок {STUB_FRAME_CHECK_BUDGET}, таймер {int(STREAM_CHECK_TIME_BUDGET_S)} c)")
+    print(f"      ├ HTTP-экспресс сегодня: {len(tail)} (потолок {HTTP_ONLY_CHECK_BUDGET})")
+    eta = math.ceil(len(tail + untouched) / max(STUB_FRAME_CHECK_BUDGET, 1))
+    print(f"      └ ждут кадровой проверки в будущих прогонах: "
+          f"{len(tail) + len(untouched)} (≈{eta} прог. до полной ревизии)")
+
+    checked_frames = 0
+    http_only_checked = 0
+    new_bad = 0
+    t0 = time.monotonic()
+    deadline_hit = False
+    processed = set()
+
+    def _run(batch, mode):
+        nonlocal checked_frames, http_only_checked, new_bad
+        if not batch:
+            return
+        with ThreadPoolExecutor(max_workers=SUBSCRIPTION_URL_CONCURRENCY) as pool:
+            futures = {pool.submit(check_stream_url_full, u, cache, mode): u
+                       for u in batch}
+            for fut in as_completed(futures):
+                u = futures[fut]
+                processed.add(u)
+                try:
+                    verdict, was_frame_checked = fut.result()
+                except Exception:
+                    continue
+                if was_frame_checked:
+                    checked_frames += 1
+                elif mode == "http":
+                    http_only_checked += 1
+                if verdict:
+                    reasons[u] = verdict
+                    new_bad += 1
+
+    # 1) голова очереди — полная проверка (HTTP + кадры), по таймеру CI
+    chunk = SUBSCRIPTION_URL_CONCURRENCY * 4
+    for i in range(0, len(work), chunk):
+        if (time.monotonic() - t0) > STREAM_CHECK_TIME_BUDGET_S:
+            deadline_hit = True
+            break
+        _run(work[i:i + chunk], "full")
+    # 2) хвост — только дешёвый HTTP-уровень: платные страницы/403 отсекаются
+    #    сразу, а кадровый вердикт для этих ссылок наступит в свой черёд FIFO
+    if not deadline_hit:
+        chunk2 = SUBSCRIPTION_URL_CONCURRENCY * 8
+        for i in range(0, len(tail), chunk2):
+            if (time.monotonic() - t0) > STREAM_CHECK_TIME_BUDGET_S - 15:
+                deadline_hit = True
+                break
+            _run(tail[i:i + chunk2], "http")
+
+    # --- Пересобираем очередь --------------------------------------------------
+    # В ней остаются все живые ссылки, которым ещё нужна работа: необработанные
+    # (не успели/не попали в бюджеты) — в прежнем FIFO-порядке первыми, затем
+    # обработанные в HTTP-режиме (ждут кадрового бюджета), затем остальные.
+    need_now = [u for u in queue if u not in processed and u not in reasons]
+    http_pending = [u for u in queue
+                    if u in processed and u not in reasons
+                    and not _fresh_full_ok(u)]
+    rotation = [u for u in live if u not in set(queue) and u not in reasons
+                and not _fresh_full_ok(u)]     # протухшие за вчера «ok»
+    queue_out, seen_m = [], set()
+    for u in need_now + http_pending + rotation:
+        if u not in seen_m:
+            seen_m.add(u)
+            queue_out.append(u)
+    save_stream_check_queue(queue_out)
+
+    secs = int(time.monotonic() - t0)
+    if deadline_hit:
+        print(f"   ⏱ Прогон остановлен по таймеру ({secs} c): кадров выполнено "
+              f"{checked_frames}, продолжение автоматически в следующем прогоне")
+    else:
+        print(f"   🔍 Кадровых проверок: {checked_frames} · HTTP-экспресс: "
+              f"{http_only_checked} · время {secs} c")
     save_stream_check_cache(cache)
+    LAST_STREAM_CHECK_STATS = {
+        "total_urls": len(urls),
+        "known_bad": sum(1 for u in urls
+                         if hashlib.md5(u.encode()).hexdigest() in cache["bad"]),
+        "frames_checked": checked_frames,
+        "http_checked": http_only_checked,
+        "queue_left": len(queue_out),
+        "budget": STUB_FRAME_CHECK_BUDGET,
+        "deadline_hit": deadline_hit,
+        "seconds": secs,
+    }
+
     if not reasons:
-        print(f"   ✅ Все проверенные потоки отдают видео ({checked} проверено)")
+        print("   ✅ Все проверенные потоки отдают видео")
         return channels
     kept = []
     shown = 0
@@ -1076,7 +1242,8 @@ def filter_subscription_streams(channels):
             kept.append(ch)
     bad_urls = {ch["url"] for ch in channels if ch["url"] in reasons}
     print(f"   💳 Удалено каналов с платной заглушкой/заставкой: {len(reasons)} "
-          f"({len(bad_urls)} уникальных ссылок)")
+          f"({len(bad_urls)} уникальных ссылок; новых за прогон: {new_bad}; "
+          f"всего известная база «заглушек»: {len(cache['bad'])})")
     return kept
 
 # ============================================================================
@@ -1442,6 +1609,29 @@ def main():
                             f"({best['name']}) |\n")
                 f.write(f"\nСтабильные ссылки: `{STABLE_PLAYLIST_FILE}` · "
                         f"Полная база: `{STABLE_DB_FILE}`\n")
+                sc = LAST_STREAM_CHECK_STATS
+                if sc:
+                    total = max(sc["queue_left"] + sc["frames_checked"], 1)
+                    done = max(total - sc["queue_left"], 0)
+                    pct = round(done * 100 / total)
+                    bar_len = 28
+                    filled = round(bar_len * pct / 100)
+                    bar = "▰" * filled + "▱" * (bar_len - filled)
+                    eta_days = math.ceil(sc["queue_left"] / max(sc["budget"], 1))
+                    f.write("\n## 🩺 Проверка потоков на заглушки (рассрочка CI)\n\n")
+                    f.write(f"`{bar}` **{pct}%** полной ревизии\n\n")
+                    f.write("| Показатель | Значение |\n|---|---|\n")
+                    f.write(f"| Уникальных ссылок | {sc['total_urls']} |\n")
+                    f.write(f"| Кадровых проверок в этом прогоне | "
+                            f"{sc['frames_checked']} |\n")
+                    f.write(f"| HTTP-экспресс проверок | {sc.get('http_checked', 0)} |\n")
+                    f.write(f"| Известных «заглушек» в базе | {sc['known_bad']} |\n")
+                    f.write(f"| В очереди на проверку | {sc['queue_left']} |\n")
+                    f.write(f"| Полная ревизия завершится примерно через | "
+                            f"{eta_days} прог. |\n")
+                    if sc["deadline_hit"]:
+                        f.write("\n⏱ Прогон остановлен по временному бюджету — "
+                                "работа продолжится завтра автоматически.\n")
                 f.write("\n🎛️ **Управление всеми списками** — интерактивный дашборд: "
                         "<https://raw.githubusercontent.com/"
                         f"{os.environ.get('GITHUB_REPOSITORY', 'OWNER/REPO')}/main/dashboard.html>`__\n")
