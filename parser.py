@@ -22,6 +22,14 @@ STABLE_MISSING_TOLERANCE = 7                # сколько дней подря
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
 
+# --- Внешний IPTV-хаб shirtv.uz (каталог готовых m3u-плейлистов) ---
+SHIRTV_INDEX_URL = "http://shirtv.uz/playlists.html"   # страница со списком плейлистов
+SHIRTV_BASE_URL = "http://shirtv.uz/"                  # база для относительных ссылок
+SHIRTV_MARKED_ONLY = True   # брать только плейлисты с бейджем "Свежий"/"Недавнее"
+                            # (загруженные за последние ~7 дней); False — все 80+
+SHIRTV_MAX_PLAYLISTS = 25   # жёсткий лимит количества плейлистов за прогон
+SHIRTV_MARKER = "# --- AUTO SOURCES (shirtv.uz) ---"
+
 # Маппинг категорий из EPG в наши
 EPG_CATEGORY_MAP = {
     'movies': '🎬 Кино и Сериалы',
@@ -382,35 +390,121 @@ def find_github_playlists():
     print(f"   ✅ Найдено {len(new_urls)} потенциальных ссылок на GitHub.")
     return new_urls
 
-def update_sources_file(new_urls):
-    existing_urls = get_existing_urls()
-    urls_to_add = new_urls - existing_urls
-    if not urls_to_add:
-        print("🔄 Новых источников на GitHub не найдено.")
-        return
-    print(f"📝 Добавление {len(urls_to_add)} новых источников в {SOURCES_FILE}...")
-    manual_lines = []
-    auto_urls = set()
-    auto_marker = "# --- AUTO SOURCES (GitHub Search) ---"
+def parse_playlists_html(html, base_url):
+    """Универсальный разбор HTML-каталога плейлистов.
+
+    Понимает карточки в стиле shirtv.uz (data-url / href на .m3u), а также
+    обычные списки ссылок <a href="...m3u">. Возвращает dict {url: name}.
+    """
+    found = {}
+
+    # 1) Карточки с data-url (shirtv.uz и подобные хабы)
+    for m in re.finditer(r'data-url="([^"]+\.m3u8?)"', html, re.I):
+        url = m.group(1).strip()
+        block = html[max(0, m.start() - 2500):m.start()]
+        nm = re.findall(r'playlist-name">([^<]+)<', block)
+        found.setdefault(url, nm[-1].strip() if nm else "")
+
+    # 2) Любые ссылки вида <a href="....m3u">
+    for m in re.finditer(r'<a[^>]+href="([^"]+\.m3u8?)"', html, re.I):
+        href = m.group(1).strip()
+        if href.startswith("//"):
+            href = "http:" + href
+        elif href.startswith("/"):
+            href = base_url.rstrip("/") + href
+        elif not re.match(r'^https?://', href):
+            href = base_url + href
+        name = ""
+        tag = re.search(r'<a[^>]*>(.*?)</a>', m.group(0), re.S | re.I)
+        if tag:
+            name = re.sub(r'<[^>]+>', '', tag.group(1)).strip()
+        found.setdefault(href, name)
+
+    return found
+
+def find_shirtv_playlists():
+    """Парсит каталог http://shirtv.uz/playlists.html и возвращает
+    множество прямых ссылок на m3u-плейлисты."""
+    print(f"\n🌐 Поиск внешних плейлистов на {SHIRTV_INDEX_URL}...")
+    try:
+        resp = requests.get(SHIRTV_INDEX_URL, timeout=20, allow_redirects=True,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"⚠️  Не удалось загрузить каталог shirtv.uz: {e}")
+        return set()
+
+    playlists = parse_playlists_html(resp.text, SHIRTV_BASE_URL)
+    if not playlists:
+        print("⚠️  На странице каталога ссылок на .m3u не найдено.")
+        return set()
+
+    # Исключаем саму страницу каталога и служебные ссылки
+    urls = {u for u in playlists if "playlists.html" not in u.lower()}
+
+    if SHIRTV_MARKED_ONLY:
+        # берём только плейлисты со статусом свежести ("Свежий"/"Недавнее")
+        fresh = set()
+        for m in re.finditer(r'last-update-badge[^>]*update-(recent|fresh)[^"]*"', resp.text):
+            block = resp.text[m.start():m.start() + 4000]
+            um = re.search(r'data-url="([^"]+\.m3u8?)"', block) or \
+                 re.search(r'href="([^"]+\.m3u8?)"', block)
+            if um:
+                u = um.group(1)
+                if not u.startswith("http"):
+                    u = SHIRTV_BASE_URL + u.lstrip("/")
+                fresh.add(u)
+        if fresh:
+            urls &= fresh
+
+    urls = {u.replace("http://", "https://", 1) if u.startswith("http://shirtv.uz") else u
+            for u in urls}
+
+    result = sorted(urls)[:SHIRTV_MAX_PLAYLISTS]
+    print(f"   🎯 Найдено плейлистов: {len(urls)}, берём: {len(result)} (лимит {SHIRTV_MAX_PLAYLISTS})")
+    return set(result)
+
+def update_sources_file(new_urls, shirtv_urls=None):
+    """Пересобирает play.list из трёх секций: ручные URL, авто-GitHub и shirtv.uz."""
+    shirtv_urls = shirtv_urls or set()
+    gh_marker = "# --- AUTO SOURCES (GitHub Search) ---"
+
+    manual_lines, gh_urls, sh_urls = [], set(), set()
     if os.path.exists(SOURCES_FILE):
+        section = None
         with open(SOURCES_FILE, "r", encoding="utf-8") as f:
-            in_auto_section = False
             for line in f:
-                if auto_marker in line:
-                    in_auto_section = True
+                if gh_marker in line:
+                    section = "gh"; continue
+                if SHIRTV_MARKER in line:
+                    section = "sh"; continue
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and section:
+                    (gh_urls if section == "gh" else sh_urls).add(stripped)
                     continue
-                if in_auto_section:
-                    stripped = line.strip()
-                    if stripped and not stripped.startswith("#"):
-                        auto_urls.add(stripped)
-                else:
+                if not section:
                     manual_lines.append(line)
-    auto_urls.update(urls_to_add)
+
+    urls_to_add = (new_urls | shirtv_urls) - get_existing_urls()
+    if not urls_to_add and (gh_urls | sh_urls):
+        print("🔄 Новых источников не найдено (GitHub + shirtv.uz).")
+        return
+
+    gh_new = (gh_urls | (new_urls - shirtv_urls))
+    sh_new = sh_urls | shirtv_urls
+    print(f"📝 Обновление {SOURCES_FILE}: GitHub={len(gh_new)}, shirtv.uz={len(sh_new)}...")
+
+    while manual_lines and not manual_lines[-1].strip():
+        manual_lines.pop()
     with open(SOURCES_FILE, "w", encoding="utf-8") as f:
         f.writelines(manual_lines)
         f.write("\n")
-        f.write(auto_marker + "\n")
-        for url in sorted(list(auto_urls)):
+        f.write(gh_marker + "\n")
+        for url in sorted(gh_new):
+            f.write(url + "\n")
+        f.write("\n")
+        f.write(SHIRTV_MARKER + "\n")
+        for url in sorted(sh_new):
             f.write(url + "\n")
     print(f"✅ Файл {SOURCES_FILE} успешно обновлен.")
 
@@ -418,16 +512,19 @@ def load_sources(filepath):
     sources = []
     if not os.path.exists(filepath):
         return sources
-    in_auto_section = False
-    auto_marker = "# --- AUTO SOURCES (GitHub Search) ---"
+    section = None  # None -> ручные, "gh" -> GitHub, "sh" -> shirtv.uz
+    gh_marker = "# --- AUTO SOURCES (GitHub Search) ---"
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if auto_marker in line:
-                in_auto_section = True
-                continue
+            if gh_marker in line:
+                section = "gh"; continue
+            if SHIRTV_MARKER in line:
+                section = "sh"; continue
             if line and not line.startswith("#"):
-                sources.append({"url": line, "filter_russian": in_auto_section})
+                # фильтруем русскоязычные только для случайных GitHub-источников;
+                # shirtv.uz отдаёт готовые русские плейлисты — фильтр не нужен
+                sources.append({"url": line, "filter_russian": section == "gh"})
     return sources
 
 def is_stub_url(url):
@@ -635,6 +732,21 @@ def parse_m3u(url, filter_russian=False, epg_categories=None):
     try:
         response = requests.get(url, timeout=15)
         response.raise_for_status()
+        # Надёжная декодировка: серверы отдают .m3u с content-type audio/mpegurl,
+        # для которого requests не знает кодировки и берёт latin-1 -> кракозябры.
+        # Стандарт IPTV-плейлистов — UTF-8, поэтому сначала пробуем utf-8 строго,
+        # при ошибке — apparent_encoding, в самом крайнем случае utf-8 с заменой.
+        if not response.encoding or response.encoding.lower() in ("iso-8859-1", "latin-1"):
+            for enc in ("utf-8", (response.apparent_encoding or "utf-8"), "utf-8"):
+                try:
+                    response.content.decode(enc)
+                    response.encoding = enc
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            else:
+                response.encoding = "utf-8"
+                response._content = response.content  # text использует errors='replace'
     except requests.RequestException as e:
         print(f"❌ Ошибка загрузки {url}: {e}")
         return []
@@ -680,7 +792,8 @@ def main():
     epg_categories = load_epg_categories()
     
     gh_urls = find_github_playlists()
-    update_sources_file(gh_urls)
+    shirtv_urls = find_shirtv_playlists()
+    update_sources_file(gh_urls, shirtv_urls)
     sources = load_sources(SOURCES_FILE)
     if not sources:
         print("🛑 Нет источников для обработки. Завершаю работу.")
