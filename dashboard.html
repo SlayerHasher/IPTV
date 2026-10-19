@@ -292,6 +292,7 @@ details.srcitem summary::-webkit-details-marker{display:none}
       <option value="stable">Стабильные (≥30 дн.)</option>
       <option value="young">Молодые (&lt;30 дн.)</option>
       <option value="reborn">Возрождённые (↺)</option>
+      <option value="subs">💳 «Нужна подписка»</option>
     </select>
     <select id="stCat"><option value="">Все категории</option></select>
     <label class="toggle hide-sm"><input type="checkbox" id="stChkNoLogo" checked> без логотипа</label>
@@ -307,6 +308,7 @@ details.srcitem summary::-webkit-details-marker{display:none}
     <button class="qchip" data-q="stable">⚓ Стабильные</button>
     <button class="qchip" data-q="young">🌱 Молодые</button>
     <button class="qchip" data-q="reborn">↺ Возрождённые</button>
+    <button class="qchip" data-q="subs">💳 Подписка</button>
   </div>
   <div class="tablewrap">
     <table>
@@ -426,6 +428,7 @@ details.srcitem summary::-webkit-details-marker{display:none}
       <button class="sm" onclick="copyText(state.histRec.url)">📋 URL</button>
       <a id="hmOpen" target="_blank" rel="noopener"><button class="sm">↗ Открыть</button></a>
       <button class="sm" id="hmExclBtn"></button>
+      <button class="sm" id="hmSubsBtn"></button>
     </div>
     <div class="tl" id="hmTimeline"></div>
   </div>
@@ -461,6 +464,18 @@ const state = {
 };
 const saveEdits=()=>localStorage.setItem("iptv-edits",JSON.stringify(state.edits));
 const isExcluded=u=>state.edits.excluded.includes(u);
+/* Каналы-заглушки «нужна подписка» (совпадает с SUBSCRIPTION_PATTERNS в parser.py) */
+const SUBS_RE=/нужна\s+подписка|необходима\s+подписка|требуется\s+подписка|нет\s+подписки|без\s+подписки|подключите\s+подписку|оформите\s+подписку|приобретите\s+подписку|купить\s+подписк|для\s+просмотра\s+нужна|доступ\s+по\s+подписке|подписка\s+(?:не\s+)?(?:истекла|закончилась|окончена)|trial\s+(?:version|channel|only)|subscription\s+(?:required|needed|only|expired)|requires?\s+(?:a\s+)?subscription|subscribe\s+to\s+watch|no\s+subscription|premium\s+(?:only|required|channel)|paid\s+(?:channel|access)/i;
+const isSubsRec=r=>SUBS_RE.test(r.name||"")||SUBS_RE.test(r.url||"");
+/* Живая проверка потока: у канала с «чистым» именем заглушка «нужна подписка»
+   видна только при открытии потока (сервер отдаёт HTML-страницу или 402/403).
+   В дашборде такие ссылки помечаются вручную чекбоксом «💳 в потоке заглушка»
+   (сохраняется в localStorage) либо массово через выделение → «Пометить 💳». */
+const SUBS_MARK_KEY='subsManualMarks';
+const getSubsMarks=()=>{try{return JSON.parse(localStorage.getItem(SUBS_MARK_KEY)||'{}')}catch(e){return{}}};
+const setSubsMark=(id,v)=>{const m=getSubsMarks();v?m[id]=1:delete m[id];localStorage.setItem(SUBS_MARK_KEY,JSON.stringify(m))};
+/* объединённый детектор: имя/URL из M3U + ручная метка «в потоке заглушка» */
+const isSubsFull=r=>isSubsRec(r)||!!getSubsMarks()[r.id||r.url];
 const $=id=>document.getElementById(id);
 const isMobile=()=>matchMedia("(max-width:760px)").matches;
 
@@ -689,6 +704,7 @@ function streamRows(){
   if(st==="stable")rows=rows.filter(r=>r.alive&&r.lifespan>=30);
   if(st==="young")rows=rows.filter(r=>r.alive&&r.lifespan<30);
   if(st==="reborn")rows=rows.filter(r=>histLen(r)>0);
+  if(st==="subs")rows=rows.filter(isSubsFull);
   if(cat)rows=rows.filter(r=>r.category===cat);
   if(noL)rows=rows.filter(r=>!r.logo);
   if(withL)rows=rows.filter(r=>!!r.logo);
@@ -699,16 +715,24 @@ function streamRows(){
   return rows;
 }
 function statusChip(r){
-  return r.alive?(r.lifespan>=30?'<span class="chip stable">⚓ стабильная</span>':'<span class="chip warn">🌱 молодая</span>'):'<span class="chip dead">✝ умерла</span>'
+  return (isSubsFull(r)?`<span class="chip warn" title="${isSubsRec(r)?'Канал-заглушка: требует платную подписку':'Помечено вручную: в потоке страница «нужна подписка»'}">💳 подписка</span>`:"")+(r.alive?(r.lifespan>=30?'<span class="chip stable">⚓ стабильная</span>':'<span class="chip warn">🌱 молодая</span>'):'<span class="chip dead">✝ умерла</span>'
     +(histLen(r)?` <span class="chip violet" title="${histLen(r)} заверш. периодов в архиве">↺${histLen(r)}</span>`:"")
-    +(isExcluded(r.url)?' <span class="chip dead">🚫 искл.</span>':"");
+    +(isExcluded(r.url)?' <span class="chip dead">🚫 искл.</span>':""));
 }
 function actionsHtml(r){
-  const excl=isExcluded(r.url);
+  const excl=isExcluded(r.url), marked=!!getSubsMarks()[r.id||r.url];
   const u=JSON.stringify(r.url).replace(/"/g,"&quot;");
   return `<button class="sm" title="Копировать URL" onclick="copyText(${u})">📋</button>
     <button class="sm" title="История периодов жизни" onclick="showHistory('${esc(r.id||r.url)}')">🕰</button>
+    <button class="sm ${marked?'danger':''}" title="${marked?'Снять метку «подписка в потоке»':'Пометить: при открытии потока — «нужна подписка»'}" onclick="toggleSubsMark('${esc(r.id||r.url)}')">💳</button>
     <button class="sm ${excl?'':'danger'}" title="${excl?'Вернуть':'Исключить'}" onclick="toggleExclude('${esc(r.url)}')">${excl?"↩":"🚫"}</button>`;
+}
+function toggleSubsMark(idOrUrl){
+  const r=dbRecords().find(x=>x.id===idOrUrl||x.url===idOrUrl); if(!r)return;
+  const key=r.id||r.url, was=!!getSubsMarks()[key];
+  setSubsMark(key,!was);
+  toast(was?"Метка «подписка в потоке» снята":"Помечено: вместо потока — страница «нужна подписка». Нажмите 🚫 чтобы исключить.","ok");
+  renderStreams();renderPlaylists();
 }
 function renderStreams(){
   const cats=[...new Set(dbRecords().map(r=>r.category).filter(Boolean))].sort();
@@ -772,6 +796,9 @@ function showHistory(idOrUrl){
   $("hmOpen").href=r.url;
   const lg=$("hmLogo");if(r.logo){lg.src=r.logo;lg.hidden=false;lg.onerror=()=>lg.hidden=true;}else lg.hidden=true;
   const eb=$("hmExclBtn");eb.textContent=isExcluded(r.url)?"↩ Вернуть в плейлисты":"🚫 Исключить";
+  const mb=$("hmSubsBtn");if(mb){const mk=!!getSubsMarks()[r.id||r.url];
+    mb.textContent=mk?"✏️ Снять метку 💳":"💳 Пометить: в потоке заглушка";
+    mb.onclick=()=>{toggleSubsMark(r.id||r.url);showHistory(r.id||r.url);};}
   eb.onclick=()=>{toggleExclude(r.url);showHistory(idOrUrl);};
   const ls=lifespan(r);
   let tl="";
