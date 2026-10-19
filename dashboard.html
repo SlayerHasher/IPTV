@@ -1,91 +1,257 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>IPTV Dashboard — управление списками</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📡%3C/text%3E%3C/svg%3E">
 <style>
+/* ==================== ТОКЕНЫ / ТЕМЫ ==================== */
 :root{
-  --bg:#0e1420; --panel:#161f30; --panel2:#1d2a42; --border:#28374f;
-  --text:#dbe6f5; --muted:#8aa0bd; --accent:#4da3ff; --green:#3ecf8e;
-  --red:#ff6b6b; --yellow:#ffc94d; --mono:'Consolas','Menlo',monospace;
+  --bg:#0b1020; --bg2:#0e1526; --panel:rgba(22,31,48,.72); --panel-solid:#161f30; --panel2:#1d2a42;
+  --border:rgba(120,150,200,.16); --border-strong:rgba(120,150,200,.3);
+  --text:#dbe6f5; --muted:#8aa0bd; --accent:#4da3ff; --accent2:#9d6bff; --green:#3ecf8e;
+  --red:#ff6b6b; --yellow:#ffc94d; --cyan:#37d6e0;
+  --grad:linear-gradient(120deg,var(--accent),var(--accent2) 55%,var(--cyan));
+  --glow:0 0 24px rgba(77,163,255,.35);
+  --mono:'JetBrains Mono','Consolas','Menlo',monospace;
+  --r:14px; --shadow:0 10px 34px rgba(0,0,0,.45);
+  --safe-b:env(safe-area-inset-bottom,0px);
 }
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh}
-header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
-header h1{font-size:18px;font-weight:600}
-header h1 span{color:var(--accent)}
-.badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--panel2);color:var(--muted)}
+html[data-theme="light"]{
+  --bg:#eef2f9; --bg2:#e4ebf5; --panel:rgba(255,255,255,.78); --panel-solid:#ffffff; --panel2:#e9eff8;
+  --border:rgba(30,60,110,.16); --border-strong:rgba(30,60,110,.3);
+  --text:#17233a; --muted:#5a6f8f; --shadow:0 10px 30px rgba(40,70,120,.15);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden;transition:background .4s,color .4s}
+/* анимированный mesh-фон */
+body::before{content:"";position:fixed;inset:-20%;z-index:-2;background:
+  radial-gradient(38% 38% at 18% 22%,rgba(77,163,255,.16),transparent 70%),
+  radial-gradient(34% 34% at 82% 16%,rgba(157,107,255,.15),transparent 70%),
+  radial-gradient(40% 40% at 65% 80%,rgba(55,214,224,.12),transparent 70%),
+  radial-gradient(30% 30% at 25% 78%,rgba(62,207,142,.10),transparent 70%);
+  animation:drift 26s ease-in-out infinite alternate;filter:blur(4px)}
+@keyframes drift{from{transform:translate3d(-2%,-1%,0) rotate(0deg)}to{transform:translate3d(2%,2%,0) rotate(3deg)}}
+#stars{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--panel2);border-radius:6px;border:2px solid var(--bg)}
+::selection{background:rgba(77,163,255,.35)}
+
+/* ==================== ХЕДЕР ==================== */
+header.topbar{display:flex;align-items:center;gap:10px;padding:12px clamp(12px,3vw,26px);position:sticky;top:0;z-index:60;
+  background:color-mix(in srgb,var(--bg) 72%,transparent);backdrop-filter:blur(16px) saturate(1.4);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.logo{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:700;letter-spacing:.3px;white-space:nowrap}
+.logo .sat{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--grad);box-shadow:var(--glow);animation:pulse 3s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 12px rgba(77,163,255,.3)}50%{box-shadow:0 0 26px rgba(157,107,255,.55)}}
+.logo b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.badge{font-size:11px;padding:3px 10px;border-radius:20px;background:var(--panel2);color:var(--muted);border:1px solid var(--border);white-space:nowrap}
 .spacer{flex:1}
-button,select,input[type=text],input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:13px;cursor:pointer}
+.iconbtn{display:grid;place-items:center;width:38px;height:38px;min-width:38px;border-radius:11px;border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:16px;cursor:pointer;transition:.2s}
+.iconbtn:hover{border-color:var(--accent);box-shadow:var(--glow);transform:translateY(-1px)}
+.iconbtn:active{transform:scale(.92)}
+.menu-pop{position:absolute;right:12px;top:64px;z-index:80;display:none;flex-direction:column;gap:6px;min-width:230px;max-width:calc(100vw - 24px);
+  background:var(--panel-solid);border:1px solid var(--border-strong);border-radius:var(--r);padding:10px;box-shadow:var(--shadow);animation:popin .18s}
+.menu-pop.open{display:flex}
+.menu-pop button{justify-content:flex-start;text-align:left}
+@keyframes popin{from{opacity:0;transform:translateY(-8px) scale(.97)}to{opacity:1}}
+
+/* ==================== КНОПКИ / ПОЛЯ ==================== */
+button,select,input[type=text],input[type=search],input[type=number],textarea{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 13px;font-size:13px;cursor:pointer;font-family:inherit;transition:.18s}
 button:hover{border-color:var(--accent)}
-button.primary{background:var(--accent);color:#08101c;border-color:var(--accent);font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--grad);color:#fff;border:none;font-weight:600;box-shadow:0 4px 18px rgba(77,163,255,.35)}
+button.primary:hover{filter:brightness(1.12);transform:translateY(-1px)}
 button.danger{color:var(--red)}
-nav.tabs{display:flex;gap:4px;padding:10px 20px 0;background:var(--panel);border-bottom:1px solid var(--border)}
-nav.tabs button{border:none;border-radius:8px 8px 0 0;background:transparent;color:var(--muted);padding:10px 18px;font-size:14px}
-nav.tabs button.active{background:var(--bg);color:var(--text);border-top:2px solid var(--accent)}
-main{padding:18px 20px;max-width:1500px;margin:0 auto}
-.tab{display:none}.tab.active{display:block}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px}
-.card .num{font-size:26px;font-weight:700}
-.card .lbl{color:var(--muted);font-size:12px;margin-top:2px}
-.card.green .num{color:var(--green)}.card.red .num{color:var(--red)}.card.blue .num{color:var(--accent)}.card.yellow .num{color:var(--yellow)}
-.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
-.toolbar input[type=text]{width:260px;cursor:text}
-table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:10px;overflow:hidden}
-th{background:var(--panel2);color:var(--muted);text-align:left;padding:9px 10px;font-size:12px;text-transform:uppercase;letter-spacing:.4px;cursor:pointer;user-select:none;white-space:nowrap}
-th.sorted::after{content:' ▾';color:var(--accent)} th.sorted.asc::after{content:' ▴';color:var(--accent)}
-td{padding:8px 10px;border-top:1px solid var(--border);vertical-align:top}
-tr:hover td{background:rgba(77,163,255,.06)}
-.urlcell{font-family:var(--mono);font-size:12px;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
-.urlcell a{color:var(--accent);text-decoration:none}
-.chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;margin-right:4px}
-.chip.alive{background:rgba(62,207,142,.15);color:var(--green)}
-.chip.dead{background:rgba(255,107,107,.15);color:var(--red)}
-.chip.stable{background:rgba(77,163,255,.15);color:var(--accent)}
-.chip.warn{background:rgba(255,201,77,.15);color:var(--yellow)}
-.lifespan-bar{height:5px;border-radius:3px;background:var(--panel2);margin-top:4px;overflow:hidden;width:120px}
-.lifespan-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green))}
-textarea{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;line-height:1.5;resize:vertical}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
-.panel h2{font-size:15px;margin-bottom:10px;color:var(--accent)}
-.hint{color:var(--muted);font-size:12px;margin:6px 0}
-.rowlist{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.rowlist input[type=text]{flex:1;cursor:text}
-.rowlist .rm{color:var(--red);border-color:transparent;background:transparent;font-size:16px;padding:2px 8px}
-.empty{padding:30px;text-align:center;color:var(--muted)}
-#toast{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:100}
-.toast-item{background:var(--panel2);border:1px solid var(--border);border-left:4px solid var(--accent);padding:10px 16px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.5);animation:in .2s;max-width:380px}
-.toast-item.err{border-left-color:var(--red)}
-.toast-item.ok{border-left-color:var(--green)}
-@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1}}
-.pager{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--muted);font-size:12px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:900px){.grid2{grid-template-columns:1fr}}
-details.srcitem summary{cursor:pointer;padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center}
-details.srcitem .cnt{color:var(--muted);font-size:12px}
+button.sm{padding:4px 9px;font-size:12px;border-radius:8px;min-width:30px}
+input[type=text],input[type=search]{cursor:text;min-width:0}
+input[type=range]{accent-color:var(--accent)}
+kbd{font-family:var(--mono);font-size:10px;background:var(--panel2);border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--muted)}
+
+/* ==================== ТАБЫ ==================== */
+nav.tabs{position:sticky;top:62px;z-index:55;display:flex;gap:6px;padding:8px clamp(10px,3vw,26px);overflow-x:auto;scrollbar-width:none;
+  background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--border)}
+nav.tabs::-webkit-scrollbar{display:none}
+.tabbtn{display:flex;align-items:center;gap:7px;border:none;border-radius:22px;background:transparent;color:var(--muted);padding:8px 15px;font-size:13.5px;white-space:nowrap;position:relative}
+.tabbtn.active{color:#fff;background:var(--grad);box-shadow:0 4px 16px rgba(77,163,255,.35);font-weight:600}
+.tabbtn .cnt{font-size:10px;background:rgba(255,255,255,.22);padding:1px 7px;border-radius:10px}
+.tabbtn:not(.active) .cnt{background:var(--panel2);color:var(--muted)}
+main{padding:clamp(12px,3vw,24px);max-width:1560px;margin:0 auto;padding-bottom:calc(78px + var(--safe-b))}
+.tab{display:none}.tab.active{display:block;animation:fadeup .35s}
+@keyframes fadeup{from{opacity:0;transform:translateY(12px)}to{opacity:1}}
+
+/* ==================== КАРТОЧКИ / ПАНЕЛИ ==================== */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:12px;margin-bottom:16px}
+.card{position:relative;background:var(--panel);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:var(--r);padding:15px;overflow:hidden;transition:.25s}
+.card::after{content:"";position:absolute;inset:0;background:radial-gradient(80% 60% at 85% 0%,rgba(77,163,255,.12),transparent);pointer-events:none}
+.card:hover{transform:translateY(-3px);border-color:var(--border-strong);box-shadow:var(--shadow)}
+.card .num{font-size:clamp(22px,4.5vw,30px);font-weight:800;font-variant-numeric:tabular-nums}
+.card .lbl{color:var(--muted);font-size:11.5px;margin-top:3px}
+.card .spark{position:absolute;right:10px;top:10px;opacity:.85}
+.card.green .num{color:var(--green)}.card.red .num{color:var(--red)}.card.blue .num{color:var(--accent)}.card.yellow .num{color:var(--yellow)}.card.violet .num{color:var(--accent2)}
+.panel{background:var(--panel);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:var(--r);padding:clamp(12px,2.5vw,18px);margin-bottom:16px}
+.panel h2{font-size:14px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.panel h2::before{content:"";width:4px;height:16px;border-radius:3px;background:var(--grad)}
+.hint{color:var(--muted);font-size:12px;margin:6px 0;line-height:1.5}
 .mono{font-family:var(--mono);font-size:12px}
-label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:16px}
+.grid2>*{min-width:0}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar input[type=search],.toolbar input[type=text]{flex:1 1 200px;min-width:140px}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+
+/* ==================== ТАБЛИЦЫ → КАРТОЧКИ НА МОБИЛЬНЫХ ==================== */
+table{width:100%;border-collapse:collapse}
+th{background:color-mix(in srgb,var(--panel2) 70%,transparent);color:var(--muted);text-align:left;padding:9px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;user-select:none;white-space:nowrap;position:sticky;top:0;z-index:5;backdrop-filter:blur(8px)}
+th:first-child{border-radius:10px 0 0 10px}th:last-child{border-radius:0 10px 10px 0}
+th.sorted::after{content:' ▾';color:var(--accent)} th.sorted.asc::after{content:' ▴';color:var(--accent)}
+td{padding:9px 10px;border-top:1px solid var(--border);vertical-align:top}
+tr:hover td{background:rgba(77,163,255,.06)}
+.tablewrap{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);overflow:auto;max-height:72vh}
+.urlcell{font-family:var(--mono);font-size:11.5px;max-width:min(420px,45vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.urlcell a{color:var(--accent);text-decoration:none}.urlcell a:hover{text-decoration:underline}
+.chip{display:inline-block;font-size:10.5px;padding:2.5px 9px;border-radius:20px;margin:1px 3px 1px 0;font-weight:600;letter-spacing:.2px}
+.chip.alive{background:rgba(62,207,142,.16);color:var(--green);box-shadow:inset 0 0 0 1px rgba(62,207,142,.3)}
+.chip.dead{background:rgba(255,107,107,.16);color:var(--red);box-shadow:inset 0 0 0 1px rgba(255,107,107,.3)}
+.chip.stable{background:rgba(77,163,255,.16);color:var(--accent);box-shadow:inset 0 0 0 1px rgba(77,163,255,.35)}
+.chip.warn{background:rgba(255,201,77,.16);color:var(--yellow);box-shadow:inset 0 0 0 1px rgba(255,201,77,.3)}
+.chip.violet{background:rgba(157,107,255,.16);color:var(--accent2);box-shadow:inset 0 0 0 1px rgba(157,107,255,.35)}
+.lifespan-bar{height:5px;border-radius:3px;background:var(--panel2);margin-top:5px;overflow:hidden;width:min(120px,30vw)}
+.lifespan-bar i{display:block;height:100%;background:var(--grad);border-radius:3px;transition:width .6s cubic-bezier(.2,.8,.2,1)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.dot.on{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2.2s infinite}
+.dot.off{background:var(--red)}
+@keyframes blink{50%{opacity:.5}}
+
+/* ---- мобильные карточки вместо таблиц ---- */
+.mcards{display:none;flex-direction:column;gap:10px}
+.mcard{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;animation:fadeup .3s;position:relative;overflow:hidden}
+.mcard.excl{opacity:.5}
+.mcard .mc-head{display:flex;align-items:center;gap:9px}
+.mcard .mc-title{font-weight:700;font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcard .mc-cat{color:var(--muted);font-size:11.5px;margin-top:2px}
+.mcard .mc-url{font-family:var(--mono);font-size:10.5px;color:var(--accent);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.mcard .mc-stats{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11.5px;color:var(--muted)}
+.mcard .mc-stats b{color:var(--text);font-size:13px}
+.mcard .mc-actions{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.mcard .mc-actions button{flex:1;padding:8px 6px;font-size:12px}
+
+/* ==================== ФИЛЬТР-ЧИПЫ (моб.) ==================== */
+.qchips{display:none;gap:7px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;scrollbar-width:none}
+.qchips::-webkit-scrollbar{display:none}
+.qchip{flex-shrink:0;border-radius:20px;padding:7px 14px;font-size:12px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;white-space:nowrap;transition:.2s}
+.qchip.on{background:var(--grad);color:#fff;border-color:transparent;font-weight:600}
+
+/* ==================== ИСТОРИЯ / МОДАЛКА ==================== */
+.modal{position:fixed;inset:0;z-index:90;display:none;place-items:center;padding:16px;background:rgba(5,8,18,.66);backdrop-filter:blur(6px)}
+.modal.open{display:grid;animation:fadeup .2s}
+.sheet{width:min(560px,100%);max-height:86vh;overflow:auto;background:var(--panel-solid);border:1px solid var(--border-strong);border-radius:18px;padding:18px;box-shadow:var(--shadow);animation:sheetin .28s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes sheetin{from{transform:translateY(40px) scale(.96);opacity:0}}
+.sheet h3{font-size:16px;margin-bottom:4px}
+.tl{margin-top:14px;position:relative;padding-left:22px}
+.tl::before{content:"";position:absolute;left:7px;top:4px;bottom:4px;width:2px;background:linear-gradient(var(--accent),var(--accent2),transparent)}
+.tl-item{position:relative;margin-bottom:14px}
+.tl-item::before{content:"";position:absolute;left:-20px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--panel-solid);border:3px solid var(--accent)}
+.tl-item.dead::before{border-color:var(--red)}.tl-item.now::before{border-color:var(--green);box-shadow:0 0 10px var(--green)}
+.tl-days{font-size:20px;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* ==================== TOAST / CONFETTI ==================== */
+#toast{position:fixed;bottom:calc(74px + var(--safe-b));left:50%;transform:translateX(-50%);display:flex;flex-direction:column-reverse;gap:8px;z-index:120;width:min(400px,calc(100vw - 24px))}
+.toast-item{background:var(--panel-solid);border:1px solid var(--border);border-left:4px solid var(--accent);padding:11px 15px;border-radius:12px;box-shadow:var(--shadow);animation:tin .25s;font-size:13px}
+.toast-item.err{border-left-color:var(--red)}.toast-item.ok{border-left-color:var(--green)}
+@keyframes tin{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1}}
+#confetti{position:fixed;inset:0;pointer-events:none;z-index:130}
+
+/* ==================== ПАГИНАЦИЯ / ПРОГРЕСС-БАР Скролла ==================== */
+.pager{display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--muted);font-size:12px;flex-wrap:wrap}
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--grad);z-index:100;box-shadow:var(--glow);transition:width .1s linear}
+
+/* ==================== НИЖНЯЯ НАВИГАЦИЯ (mobile) ==================== */
+nav.bottomnav{display:none;position:fixed;left:0;right:0;bottom:0;z-index:70;padding:7px 8px calc(7px + var(--safe-b));
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px);border-top:1px solid var(--border)}
+.bnav-inner{display:flex;justify-content:space-around;max-width:560px;margin:0 auto}
+.bn{display:flex;flex-direction:column;align-items:center;gap:2px;border:none;background:none;color:var(--muted);font-size:10px;padding:5px 10px;border-radius:12px;position:relative}
+.bn .ic{font-size:19px;transition:transform .25s}
+.bn.active{color:var(--accent)}
+.bn.active .ic{transform:translateY(-2px) scale(1.15)}
+.bn.active::after{content:"";position:absolute;top:-7px;width:26px;height:3px;border-radius:3px;background:var(--grad);box-shadow:var(--glow)}
+
+/* ==================== СКЕЛЕТОН / СПИННЕР ==================== */
+.skeleton{background:linear-gradient(90deg,var(--panel2) 25%,color-mix(in srgb,var(--panel2) 55%,var(--bg)) 50%,var(--panel2) 75%);background-size:200% 100%;animation:shim 1.3s infinite;border-radius:8px;color:transparent!important}
+@keyframes shim{to{background-position:-200% 0}}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:rot .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes rot{to{transform:rotate(1turn)}}
+
+/* pull-to-refresh */
+#ptr{display:none;text-align:center;color:var(--muted);font-size:12px;padding:6px}
+#ptr i{display:inline-block;transition:transform .2s;font-style:normal}
+#ptr.go i{transform:rotate(180deg)}
+
+textarea.code{width:100%;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font-family:var(--mono);font-size:12.5px;line-height:1.55;resize:vertical;cursor:text}
+.rowlist{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.rowlist input[type=text]{flex:1}
+.rowlist .rm{color:var(--red);border-color:transparent;background:transparent;font-size:15px;padding:4px 9px}
+label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;cursor:pointer;white-space:nowrap}
+details.srcitem summary{cursor:pointer;padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;list-style:none}
+details.srcitem summary::-webkit-details-marker{display:none}
+.cmp-bar{display:flex;height:22px;border-radius:8px;overflow:hidden;font-size:10px;font-weight:700;color:#08101c}
+.cmp-bar div{display:grid;place-items:center;min-width:0;transition:flex-grow .6s}
+
+/* ==================== АДАПТИВ ==================== */
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+@media(max-width:760px){
+  header.topbar{padding:10px 12px}
+  .logo{font-size:15px}.logo .sat{width:30px;height:30px}
+  nav.tabs{display:none}
+  nav.bottomnav{display:block}
+  main{padding:12px 12px calc(90px + var(--safe-b))}
+  .hide-sm{display:none!important}
+  /* таблицы превращаем в карточки */
+  .tablewrap{background:none;border:none;max-height:none;overflow:visible}
+  .tablewrap table{display:none}
+  .mcards{display:flex}
+  .qchips{display:flex}
+  .toolbar{gap:6px}
+  .toolbar>*{flex:1 1 auto}
+  .toolbar .spacer{display:none}
+  .pager{justify-content:center}
+  #toast{bottom:calc(84px + var(--safe-b))}
+}
+@media print{header,nav,#toast,.toolbar,.pager,.iconbtn{display:none!important}body{background:#fff;color:#000}}
 </style>
 </head>
 <body>
-<header>
-  <h1>📡 IPTV <span>Dashboard</span></h1>
-  <span class="badge" id="hdr-updated">не загружено</span>
+<div id="progress"></div>
+<canvas id="stars"></canvas>
+<div id="ptr"><i>⟳</i> <span>потяните для обновления данных</span></div>
+
+<header class="topbar">
+  <div class="logo"><span class="sat">📡</span><span>IPTV&nbsp;<b>Dashboard</b></span></div>
+  <span class="badge hide-sm" id="hdr-updated">не загружено</span>
   <div class="spacer"></div>
-  <select id="datasetSel" title="Набор данных"></select>
-  <button onclick="loadDataset(document.getElementById('datasetSel').value)">⬇ Загрузить с GitHub</button>
-  <button onclick="openFilePicker()">📂 Открыть файл…</button>
-  <input type="file" id="fileInput" accept=".json,.m3u,.list,.txt" multiple hidden>
-  <button class="primary" onclick="exportAll()">💾 Скачать всё (zip-набор файлов)</button>
+  <button class="iconbtn primary" style="width:auto;min-width:0;padding:0 14px;gap:6px;border:none" onclick="loadDataset(document.getElementById('datasetSel')?.value||'own')" title="Обновить данные">⟳</button>
+  <button class="iconbtn" id="btnMenu" aria-label="Меню" title="Меню действий">⋯</button>
 </header>
 
+<div class="menu-pop" id="menuPop">
+  <select id="datasetSel" title="Набор данных"></select>
+  <button onclick="loadDataset(document.getElementById('datasetSel').value);closeMenu()">⬇ Загрузить с GitHub</button>
+  <button onclick="openFilePicker();closeMenu()">📂 Открыть файл…</button>
+  <button class="primary" onclick="exportAll();closeMenu()">💾 Скачать всё</button>
+  <button onclick="toggleTheme();closeMenu()"><span id="themeLbl">☀ Светлая тема</span></button>
+  <button onclick="toggleMotion();closeMenu()"><span id="motionLbl">✦ Выключить анимации</span></button>
+  <button onclick="showHelp()">⌨ Горячие клавиши и FAQ</button>
+</div>
+<input type="file" id="fileInput" accept=".json,.m3u,.list,.txt" multiple hidden>
+
 <nav class="tabs">
-  <button data-tab="overview" class="active">Обзор</button>
-  <button data-tab="streams">Трансляции и жизнь</button>
-  <button data-tab="sources">Источники (play.list)</button>
-  <button data-tab="playlists">Плейлисты (M3U)</button>
+  <button class="tabbtn active" data-tab="overview">✨ Обзор <span class="cnt" id="tc-all">—</span></button>
+  <button class="tabbtn" data-tab="streams">📺 Трансляции <span class="cnt" id="tc-alive">—</span></button>
+  <button class="tabbtn" data-tab="sources">🔗 Источники</button>
+  <button class="tabbtn" data-tab="playlists">🎞 Плейлисты</button>
 </nav>
 
 <main>
@@ -94,13 +260,20 @@ label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-siz
   <div class="cards" id="ovCards"></div>
   <div class="grid2">
     <div class="panel">
-      <h2>Распределение по периоду жизни (активные трансляции)</h2>
+      <h2>Распределение по периоду жизни</h2>
+      <p class="hint"><span class="dot on"></span>живые&nbsp;&nbsp;<span class="dot off"></span>мёртвые</p>
       <div id="ovHist"></div>
     </div>
     <div class="panel">
       <h2>Топ-10 долгоживущих</h2>
-      <table><tbody id="ovTop"></tbody></table>
+      <div class="tablewrap" style="border:none;max-height:340px;background:none"><table><tbody id="ovTop"></tbody></table></div>
+      <div class="mcards" id="ovTopM"></div>
     </div>
+  </div>
+  <div class="panel">
+    <h2>Состав плейлиста по категориям</h2>
+    <div class="cmp-bar" id="ovCmp"></div>
+    <div id="ovLegend" class="hint" style="margin-top:8px"></div>
   </div>
   <div class="panel">
     <h2>Недавние события</h2>
@@ -111,35 +284,47 @@ label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-siz
 <!-- ============ ТРАНСЛЯЦИИ ============ -->
 <section class="tab" id="tab-streams">
   <div class="toolbar">
-    <input type="text" id="stSearch" placeholder="🔍 Поиск по названию или URL…">
+    <input type="search" id="stSearch" placeholder="🔍 Поиск по названию или URL…" autocomplete="off">
     <select id="stStatus">
       <option value="">Все статусы</option>
       <option value="alive">Активные</option>
       <option value="dead">Умершие</option>
       <option value="stable">Стабильные (≥30 дн.)</option>
       <option value="young">Молодые (&lt;30 дн.)</option>
+      <option value="reborn">Возрождённые (↺)</option>
     </select>
     <select id="stCat"><option value="">Все категории</option></select>
-    <label class="toggle"><input type="checkbox" id="stChkNoLogo" checked> без логотипа</label>
-    <label class="toggle"><input type="checkbox" id="stChkWithLogo"> с логотипом</label>
-    <div class="spacer"></div>
-    <span class="hint" id="stCount"></span>
-    <button onclick="downloadStableFromDb()">⬇ Скачать stable.m3u из базы</button>
+    <label class="toggle hide-sm"><input type="checkbox" id="stChkNoLogo" checked> без логотипа</label>
+    <label class="toggle hide-sm"><input type="checkbox" id="stChkWithLogo"> с логотипом</label>
+    <div class="spacer hide-sm"></div>
+    <span class="hint hide-sm" id="stCount"></span>
+    <button class="primary" onclick="downloadStableFromDb()">⬇ stable.m3u из базы</button>
   </div>
-  <table>
-    <thead><tr>
-      <th data-k="name" class="sorted asc">Канал</th>
-      <th data-k="category">Категория</th>
-      <th>URL потока</th>
-      <th data-k="lifespan">Период жизни</th>
-      <th data-k="first_seen">Первое появление</th>
-      <th data-k="last_seen">Последняя видимость</th>
-      <th data-k="appearances">Появлений</th>
-      <th data-k="status">Статус</th>
-      <th>Действия</th>
-    </tr></thead>
-    <tbody id="stBody"></tbody>
-  </table>
+  <div class="qchips" id="stQchips">
+    <button class="qchip on" data-q="">Все</button>
+    <button class="qchip" data-q="alive">🟢 Активные</button>
+    <button class="qchip" data-q="dead">💀 Умершие</button>
+    <button class="qchip" data-q="stable">⚓ Стабильные</button>
+    <button class="qchip" data-q="young">🌱 Молодые</button>
+    <button class="qchip" data-q="reborn">↺ Возрождённые</button>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th data-k="name" class="sorted asc">Канал</th>
+        <th data-k="category" class="hide-sm">Категория</th>
+        <th class="hide-sm">URL потока</th>
+        <th data-k="lifespan">Период жизни</th>
+        <th data-k="first_seen" class="hide-sm">Старт периода</th>
+        <th data-k="last_seen" class="hide-sm">Последняя видимость</th>
+        <th data-k="appearances" class="hide-sm">Появлений</th>
+        <th data-k="status">Статус</th>
+        <th>Действия</th>
+      </tr></thead>
+      <tbody id="stBody"></tbody>
+    </table>
+    <div class="mcards" id="stBodyM"></div>
+  </div>
   <div class="pager">
     <button onclick="stPage(-1)">← Назад</button>
     <span id="stPageLbl"></span>
@@ -158,25 +343,26 @@ label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-siz
       <p class="hint">URL'ы плейлистов-источников, добавляемые вручную. Строки вида <span class="mono"># …</span> в файле — комментарии.</p>
       <div id="srcManual"></div>
       <div class="rowlist" style="margin-top:8px">
-        <input type="text" id="srcNewUrl" placeholder="https://example.com/playlist.m3u">
+        <input type="text" id="srcNewUrl" placeholder="https://example.com/playlist.m3u" inputmode="url">
         <button onclick="addSource('manual')">+ Добавить</button>
       </div>
       <div class="hint" style="margin-top:10px">Комментарии (сохранятся в начале файла):</div>
-      <textarea id="srcComments" rows="3"></textarea>
+      <textarea class="code" id="srcComments" rows="3"></textarea>
     </div>
     <div class="panel">
       <h2>Авто-источники (GitHub Search)</h2>
-      <p class="hint">Находятся скриптом parser.py автоматически. Здесь можно отметить те, что нужно исключить навсегда (они попадут в блок <span class="mono"># EXCLUDED</span>).</p>
+      <p class="hint">Находятся скриптом parser.py автоматически. Отметьте те, что нужно исключить навсегда (попадут в блок <span class="mono"># EXCLUDED</span>).</p>
+      <div class="rowlist"><input type="text" id="srcAutoFilter" placeholder="🔍 фильтр по домену…" oninput="renderSources()" style="cursor:text"></div>
       <div id="srcAutoList" style="max-height:340px;overflow:auto"></div>
     </div>
   </div>
   <div class="panel">
     <h2>Предпросмотр play.list</h2>
-    <textarea id="srcPreview" rows="14" readonly></textarea>
+    <textarea class="code" id="srcPreview" rows="14" readonly></textarea>
     <div class="toolbar" style="margin-top:10px">
       <button class="primary" onclick="downloadText(state.playlistSources,'play.list')">⬇ Скачать play.list</button>
       <button onclick="copyText(state.playlistSources)">📋 Копировать</button>
-      <button onclick="parsePlayListPrompt()">📥 Импорт из текста play.list</button>
+      <button onclick="parsePlayListPrompt()">📥 Импорт из текста</button>
     </div>
   </div>
 </section>
@@ -189,136 +375,209 @@ label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-siz
       <option value="stable">stable.m3u (стабильные)</option>
       <option value="custom">— пользовательский M3U —</option>
     </select>
-    <input type="file" id="plFile" accept=".m3u,.txt">
-    <input type="text" id="plSearch" placeholder="🔍 Фильтр по имени / группе / URL…" style="width:280px">
+    <input type="file" id="plFile" accept=".m3u,.txt" style="max-width:190px">
+    <input type="search" id="plSearch" placeholder="🔍 Фильтр по имени / группе / URL…" autocomplete="off">
     <select id="plGroup"><option value="">Все группы</option></select>
-    <div class="spacer"></div>
+    <div class="spacer hide-sm"></div>
     <span class="chip alive" id="plVisible"></span>
-    <button onclick="selectAllInFilter(true)">Выделить все (в фильтре)</button>
-    <button onclick="selectAllInFilter(false)">Снять</button>
-    <button class="danger" onclick="removeSelectedFromPlaylist()">🗑 Удалить выбранные</button>
-    <button class="primary" onclick="downloadCurrentPlaylist()">⬇ Скачать edited.m3u</button>
+    <button onclick="selectAllInFilter(true)" class="sm">Выделить все</button>
+    <button onclick="selectAllInFilter(false)" class="sm">Снять</button>
+    <button class="danger sm" onclick="removeSelectedFromPlaylist()">🗑 Удалить выбранные</button>
+    <button class="primary sm" onclick="downloadCurrentPlaylist()">⬇ edited.m3u</button>
   </div>
-  <div class="panel" style="max-height:600px;overflow:auto;padding:0">
+  <div class="tablewrap">
     <table>
       <thead><tr>
         <th style="width:34px"><input type="checkbox" id="plHeadChk" onchange="selectAllInFilter(this.checked)"></th>
-        <th style="width:44px">#</th><th>Название</th><th>Группа</th><th>tvg-id</th><th>URL</th>
+        <th style="width:44px">#</th><th>Название</th><th class="hide-sm">Группа</th><th class="hide-sm">tvg-id</th><th class="hide-sm">URL</th>
       </tr></thead>
       <tbody id="plBody"></tbody>
     </table>
+    <div class="mcards" id="plBodyM"></div>
   </div>
-  <p class="hint">Удаление из предпросмотра помечает запись как исключённую — при скачивании edited.m3u её не будет. Исключения хранятся в localStorage и влияют также на генерацию stable.m3u (кнопка во вкладке «Трансляции»).</p>
+  <p class="hint">Удаление помечает запись исключённой (localStorage) — её не будет в edited.m3u и она игнорируется при генерации stable.m3u.</p>
 </section>
 </main>
 
+<!-- нижняя навигация для мобильных -->
+<nav class="bottomnav"><div class="bnav-inner">
+  <button class="bn active" data-tab="overview"><span class="ic">✨</span>Обзор</button>
+  <button class="bn" data-tab="streams"><span class="ic">📺</span>Жизнь</button>
+  <button class="bn" data-tab="sources"><span class="ic">🔗</span>Источники</button>
+  <button class="bn" data-tab="playlists"><span class="ic">🎞</span>M3U</button>
+  <button class="bn" onclick="loadDataset(document.getElementById('datasetSel').value||'own')"><span class="ic">⟳</span>Обновить</button>
+</div></nav>
+
+<!-- модалка истории -->
+<div class="modal" id="histModal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="sheet">
+    <div style="display:flex;gap:10px;align-items:center">
+      <img id="hmLogo" style="width:40px;height:40px;object-fit:contain;border-radius:8px;background:var(--panel2)" hidden>
+      <div style="flex:1;min-width:0"><h3 id="hmName"></h3><div class="hint mono" id="hmHost" style="word-break:break-all"></div></div>
+      <button class="iconbtn" onclick="document.getElementById('histModal').classList.remove('open')">✕</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="sm" onclick="copyText(state.histRec.url)">📋 URL</button>
+      <a id="hmOpen" target="_blank" rel="noopener"><button class="sm">↗ Открыть</button></a>
+      <button class="sm" id="hmExclBtn"></button>
+    </div>
+    <div class="tl" id="hmTimeline"></div>
+  </div>
+</div>
+
+<!-- модалка помощи -->
+<div class="modal" id="helpModal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="sheet">
+    <div style="display:flex;align-items:center"><h3 style="flex:1">⌨ Горячие клавиши и FAQ</h3>
+    <button class="iconbtn" onclick="document.getElementById('helpModal').classList.remove('open')">✕</button></div>
+    <div class="tl" style="margin-top:10px">
+      <div class="tl-item"><b>Клавиши</b><br><kbd>1–4</kbd> вкладки · <kbd>/</kbd> фокус на поиск · <kbd>t</kbd> тема · <kbd>r</kbd> перезагрузить данные · <kbd>←/→</kbd> страницы таблиц · <kbd>Esc</kbd> закрыть окна</div>
+      <div class="tl-item"><b>Как обновляются данные?</b><br>Workflow GitHub Actions каждый день коммитит <span class="mono">stable_streams.json</span>. Страница тянет его через raw.githubusercontent / GitHub Pages.</div>
+      <div class="tl-item"><b>Открытие file://</b><br>Из-за политики браузеров файлы подтягиваются только по http(s). Локально: <span class="mono">python -m http.server</span> либо кнопка «Открыть файл…».</div>
+      <div class="tl-item"><b>Экспорт обратно</b><br>«Скачать всё» отдаёт json+m3u+play.list — закоммитьте их в репозиторий.</div>
+      <div class="tl-item dead"><b>Что такое «умерла»?</b><br>Ссылка отсутствовала в плейлисте дольше допуска (7 дней). Завершённый период жизни сохраняется в архиве histories.</div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
+<canvas id="confetti"></canvas>
 
 <script>
 "use strict";
 /* ================= СОСТОЯНИЕ ================= */
 const state = {
-  db: null,                 // stable_streams.json
-  fullM3u: "",              // playlist.m3u
-  stableM3u: "",            // stable.m3u
-  sourcesText: "",          // play.list
-  parsed: { manual:[], auto:[], excluded:[], comments:"" },
-  customM3u: null,          // [{extinf,url,name,group,tvgId,logo}]
-  edits: JSON.parse(localStorage.getItem("iptv-edits")||'{"excluded":[]}'), // исключения каналов
-  stSort:{key:"lifespan",asc:false},
-  stPageNum:0,
+  db:null, fullM3u:"", stableM3u:"", sourcesText:"",
+  parsed:{manual:[],auto:[],excluded:[],comments:""},
+  customM3u:null,
+  edits:JSON.parse(localStorage.getItem("iptv-edits")||'{"excluded":[]}'),
+  stSort:{key:"lifespan",asc:false}, stPageNum:0, histRec:null,
 };
-function saveEdits(){localStorage.setItem("iptv-edits",JSON.stringify(state.edits));}
-const isExcluded = u => state.edits.excluded.includes(u);
+const saveEdits=()=>localStorage.setItem("iptv-edits",JSON.stringify(state.edits));
+const isExcluded=u=>state.edits.excluded.includes(u);
+const $=id=>document.getElementById(id);
+const isMobile=()=>matchMedia("(max-width:760px)").matches;
+
+/* ================= ТЕМЫ / АНИМАЦИИ ================= */
+let motion=true;
+try{motion=localStorage.getItem("iptv-motion")!=="off"}catch(e){}
+(function initTheme(){
+  const saved=localStorage.getItem("iptv-theme");
+  const t=saved||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");
+  document.documentElement.dataset.theme=t; updThemeLbl();
+})();
+function updThemeLbl(){$("themeLbl").textContent=document.documentElement.dataset.theme==="dark"?"☀ Светлая тема":"🌙 Тёмная тема";
+  $("motionLbl").textContent=motion?"✦ Выключить анимации":"✦ Включить анимации";}
+function toggleTheme(){const d=document.documentElement;d.dataset.theme=d.dataset.theme==="dark"?"light":"dark";
+  localStorage.setItem("iptv-theme",d.dataset.theme);updThemeLbl();
+  document.querySelector('meta[name=theme-color]').content=d.dataset.theme==="dark"?"#0b1020":"#eef2f9";refreshAll();}
+function toggleMotion(){motion=!motion;localStorage.setItem("iptv-motion",motion?"on":"off");updThemeLbl();applyMotion();}
+function applyMotion(){
+  if(!motion){let s=$("nomotion");if(!s){s=document.createElement("style");s.id="nomotion";
+    s.textContent="*,*::before,*::after{animation:none!important;transition:none!important}";document.head.appendChild(s);}}
+  else if($("nomotion"))$("nomotion").remove();}
+if(matchMedia("(prefers-reduced-motion: reduce)").matches){motion=false;}
+
+/* ================= ЗВЁЗДНЫЙ ФОН ================= */
+(function stars(){
+  const c=$("stars"),x=c.getContext("2d");let W,H,st=[];
+  function rs(){W=c.width=innerWidth;H=c.height=innerHeight;
+    st=Array.from({length:Math.min(90,Math.floor(W/14))},()=>({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.4+.3,p:Math.random()*6.28,s:Math.random()*.02+.005}));}
+  rs();addEventListener("resize",rs);
+  (function loop(){if(motion){x.clearRect(0,0,W,H);for(const o of st){o.p+=o.s;x.globalAlpha=.25+Math.abs(Math.sin(o.p))*.55;
+    x.fillStyle=document.documentElement.dataset.theme==="dark"?"#9fc4ff":"#4a7bc0";x.beginPath();x.arc(o.x,o.y,o.r,0,7);x.fill();}x.globalAlpha=1;}
+    requestAnimationFrame(loop);})();
+})();
 
 /* ================= УТИЛИТЫ ================= */
-function toast(msg,type=""){const t=document.createElement("div");t.className="toast-item "+type;t.textContent=msg;document.getElementById("toast").appendChild(t);setTimeout(()=>t.remove(),4200);}
+function toast(msg,type=""){const t=document.createElement("div");t.className="toast-item "+type;t.textContent=msg;$("toast").appendChild(t);
+  setTimeout(()=>{t.style.opacity=0;t.style.transition="opacity .4s";setTimeout(()=>t.remove(),400)},3800);}
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function downloadText(text,name){const b=new Blob([text],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;a.click();URL.revokeObjectURL(a.href);}
-function copyText(t){navigator.clipboard.writeText(t).then(()=>toast("Скопировано в буфер обмена","ok"));}
-function fmtDate(iso){if(!iso)return "—";const d=new Date(iso+"T00:00:00");return d.toLocaleDateString("ru-RU",{day:"2-digit",month:"short",year:"numeric"});}
-function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
+function copyText(t){(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{toast("Скопировано в буфер обмена","ok");confettiAt(innerWidth/2,60,18);}).catch(()=>{const ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("Скопировано","ok");});}
+function fmtDate(iso){if(!iso)return "—";const d=new Date(iso+"T00:00:00");return isNaN(d)?"—":d.toLocaleDateString("ru-RU",{day:"2-digit",month:"short",year:"numeric"});}
+function daysBetween(a,b){const da=new Date(a),db=new Date(b);if(isNaN(da)||isNaN(db))return 0;return Math.max(0,Math.round((db-da)/86400000));}
+function todayISO(){return new Date().toISOString().slice(0,10);}
+function shiftDate(days){const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
+function animateCount(el,to,dur=900){if(!motion){el.textContent=to;return;}const t0=performance.now();
+  (function f(t){const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,3);el.textContent=Math.round(to*e);if(p<1)requestAnimationFrame(f);})(t0);}
+/* confetti */
+let confParts=[];
+function confettiAt(cx,cy,n=60){if(!motion)return;const c=$("confetti"),x=c.getContext("2d");c.width=innerWidth;c.height=innerHeight;
+  const cols=["#4da3ff","#9d6bff","#37d6e0","#3ecf8e","#ffc94d","#ff6b6b"];
+  for(let i=0;i<n;i++)confParts.push({x:cx,y:cy,vx:(Math.random()-.5)*9,vy:-(Math.random()*7+3),g:.25,r:Math.random()*5+2,c:cols[i%6],a:1,rot:Math.random()*6});
+  if(!c._run){c._run=1;(function f(){x.clearRect(0,0,c.width,c.height);confParts=confParts.filter(p=>p.a>0);
+    for(const p of confParts){p.x+=p.vx;p.y+=p.vy;p.vy+=p.g;p.a-=.014;p.rot+=.15;x.save();x.translate(p.x,p.y);x.rotate(p.rot);x.globalAlpha=Math.max(0,p.a);x.fillStyle=p.c;x.fillRect(-p.r,-p.r/2,p.r*2,p.r);x.restore();}
+    if(confParts.length)requestAnimationFrame(f);else c._run=0;})();}}
+function celebrate(){confettiAt(innerWidth/2,innerHeight*.35,120);}
 
 /* ================= ЗАГРУЗКА ДАННЫХ ================= */
-// Относительные пути работают при размещении на GitHub Pages и при запуске локального
-// http-сервера в папке репозитория. При открытии file:// используйте кнопку «Открыть файл…».
 const DEFAULT_FILES=["stable_streams.json","play.list","playlist.m3u","stable.m3u"];
 function datasetBase(sel){
-  if(sel==="own"||sel==="") return ""; // файлы рядом с dashboard.html
+  if(sel==="own"||sel==="") return "";
   if(sel.startsWith("http")) return sel.endsWith("/")?sel:sel+"/";
   const m=location.hostname.match(/^([^.]+)\.github\.io$/);
   let owner=m?m[1]:(location.pathname.split("/")[1]||"USERNAME");
   return `https://raw.githubusercontent.com/${owner}/${sel}/`;
 }
 function fillDatasetSelect(){
-  const sel=document.getElementById("datasetSel");
-  sel.innerHTML="";
+  const sel=$("datasetSel");sel.innerHTML="";
   const opt=(v,l)=>{const o=document.createElement("option");o.value=v;o.textContent=l;sel.appendChild(o);};
-  opt("own","▶ Файлы рядом с dashboard.html");
+  opt("own","▶ Файлы рядом со страницей");
   opt("russian-iptv-generator/main","russian-iptv-generator (main)");
   opt("custom","🔗 Другой репозиторий / URL…");
   sel.onchange=()=>{
-    if(sel.value==="custom"){
-      const url=prompt("Владелец/имя_репо или полный URL папки с файлами:");
-      if(!url)return; sel.value=url;
-    }
+    if(sel.value==="custom"){const url=prompt("Владелец/имя_репо или полный URL папки с файлами:");if(!url)return;sel.value=url;}
     loadDataset(sel.value);
   };
 }
 async function fetchText(url){const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error(r.status+" "+url);return r.text();}
+let loading=false;
 async function loadDataset(base){
+  if(loading)return;loading=true;
+  $("hdr-updated").innerHTML='<span class="spin"></span>загрузка…';
   base=datasetBase(base);
-  document.getElementById("hdr-updated").textContent="загрузка…";
   try{
     const got={};
-    for(const f of DEFAULT_FILES){
-      try{got[f]=await fetchText(base+f);}catch(e){got[f]=null;}
-    }
+    await Promise.all(DEFAULT_FILES.map(async f=>{try{got[f]=await fetchText(base+f);}catch(e){got[f]=null;}}));
     if(got["stable_streams.json"]===null){
-      toast("Не найден stable_streams.json"+(location.protocol==="file:"?" (при открытии file:// загрузите файлы кнопкой «Открыть файл…»)":": сначала выполните workflow с новой версией parser.py"),"err");
-      return;
+      toast("Не найден stable_streams.json"+(location.protocol==="file:"?" (при открытии file:// используйте «Открыть файл…»)":": сначала выполните workflow с новой версией parser.py"),"err");
+      $("hdr-updated").textContent="нет данных";return;
     }
     ingestData(JSON.parse(got["stable_streams.json"]),got["play.list"]||"",got["stable.m3u"],got["playlist.m3u"]||"");
     toast("Данные загружены"+(base?": "+base:" (рядом со страницей)"),"ok");
-  }catch(e){toast("Ошибка загрузки: "+e.message,"err");}
+  }catch(e){toast("Ошибка загрузки: "+e.message,"err");$("hdr-updated").textContent="ошибка загрузки";}
+  finally{loading=false;if($("ptr"))$("ptr").style.display="none";}
 }
-function openFilePicker(){document.getElementById("fileInput").click();}
-document.getElementById("fileInput").addEventListener("change",async ev=>{
+function openFilePicker(){$("fileInput").click();}
+$("fileInput").addEventListener("change",async ev=>{
   for(const f of ev.target.files){
     const txt=await f.text();const n=f.name.toLowerCase();
-    if(n.endsWith(".json")) ingestDb(JSON.parse(txt));
-    else if(n==="play.list"||n.endsWith(".list")|| (n.endsWith(".txt")&&!txt.includes("#EXTINF"))) state.sourcesText=txt;
-    else if(n.startsWith("stable")){state.stableM3u=txt; ingestM3uMeta(txt);}
+    if(n.endsWith(".json")){state.db=JSON.parse(txt);}
+    else if(n==="play.list"||n.endsWith(".list")||(n.endsWith(".txt")&&!txt.includes("#EXTINF"))) state.sourcesText=txt;
+    else if(n.startsWith("stable")){state.stableM3u=txt;}
     else if(n.endsWith(".m3u")) state.fullM3u=txt;
   }
-  if(state.db) refreshAll();
-  toast("Файлы загружены","ok");
-  ev.target.value="";
+  if(state.db)ingestData(state.db,state.sourcesText,state.stableM3u,state.fullM3u);
+  toast("Файлы загружены","ok");ev.target.value="";
 });
-function ingestM3uMeta(txt){
-  // читаем # LIVE-DAYS / logo из stable.m3u если есть
-}
 function ingestData(db,playListTxt,stableTxt,fullTxt){
-  state.db=db; state.sourcesText=playListTxt; state.stableM3u=stableTxt||""; state.fullM3u=fullTxt;
-  if(!state.stableM3u) state.stableM3u=buildStableFromDb();
-  parsePlayList(playListTxt); refreshAll();
+  state.db=db;state.sourcesText=playListTxt;state.stableM3u=stableTxt||"";state.fullM3u=fullTxt;
+  if(!state.stableM3u)state.stableM3u=buildStableFromDb();
+  parsePlayList(playListTxt);refreshAll();
 }
-function ingestDb(db){state.db=db;}
 
-/* ================= СТАБИЛЬНЫЙ ID / LIFE ================= */
+/* ================= LIFE ================= */
 function lifespan(rec){
-  if(!rec.alive){const h=(rec.histories||[]);return h.length?h[h.length-1].days:0;}
-  // активная запись: период жизни от current_birth до даты обновления базы (или last_seen)
+  if(!rec.alive){const h=rec.histories||[];return h.length?h[h.length-1].days:0;}
   const ref=(state.db&&state.db.updated)||rec.last_seen||todayISO();
-  return daysBetween(rec.current_birth||rec.first_seen, String(ref)<String(rec.last_seen||ref)?ref:rec.last_seen||ref)+1;
+  return daysBetween(rec.current_birth||rec.first_seen,String(ref)<String(rec.last_seen||ref)?ref:rec.last_seen||ref)+1;
 }
-function histLen(rec){return (rec.histories||[]).length;}
-function todayISO(){return new Date().toISOString().slice(0,10);}
+const histLen=r=>(r.histories||[]).length;
 
-/* ================= РАЗБОР play.list ================= */
+/* ================= PLAY.LIST ================= */
 function parsePlayList(txt){
-  const p={manual:[],auto:[],excluded:[],comments:[]};
-  let section="manual";
+  const p={manual:[],auto:[],excluded:[],comments:[]};let section="manual";
   txt.split(/\r?\n/).forEach(line=>{
     const t=line.trim();
     if(/^#\s*(AUTO|AUTO SOURCES)/i.test(t)){section="auto";return;}
@@ -333,126 +592,187 @@ function buildPlayList(){
   let out=(p.comments||"# Это список источников IPTV.\n# Строки, начинающиеся с #, игнорируются скриптом.")+"\n\n";
   out+="# --- ВАШИ РУЧНЫЕ ИСТОЧНИКИ ---\n"+p.manual.join("\n")+"\n\n";
   out+="# --- AUTO SOURCES (GitHub Search) ---\n"+p.auto.join("\n")+"\n";
-  if(p.excluded.length) out+="\n# --- EXCLUDED (ручное исключение dashboard-ом) ---\n"+p.excluded.map(u=>"# "+u).join("\n")+"\n";
+  if(p.excluded.length)out+="\n# --- EXCLUDED (ручное исключение dashboard-ом) ---\n"+p.excluded.map(u=>"# "+u).join("\n")+"\n";
   return out;
 }
 
 /* ================= РЕНДЕР: ОБЗОР ================= */
-function dbRecords(){return Object.values(state.db.streams ?? state.db.records ?? state.db);}
+function dbRecords(){return Object.values(state.db.streams??state.db.records??state.db);}
 function computeStats(){
   const recs=dbRecords();
-  const alive=recs.filter(r=>r.alive), dead=recs.filter(r=>!r.alive);
-  const ls=r=>lifespan(r);
+  const alive=recs.filter(r=>r.alive),dead=recs.filter(r=>!r.alive);
   const buckets={"1–6 дней":[0,0],"7–29":[0,0],"30–89":[0,0],"90–179":[0,0],"180–364":[0,0],"≥365":[0,0]};
   const keys=Object.keys(buckets);
-  alive.forEach(r=>{const d=ls(r);
-    const i=d>=365?5:d>=180?4:d>=90?3:d>=30?2:d>=7?1:0; buckets[keys[i]][0]++;});
-  dead.forEach(r=>{const d=ls(r);
-    const i=d>=365?5:d>=180?4:d>=90?3:d>=30?2:d>=7?1:0; buckets[keys[i]][1]++;});
-  const sorted=alive.slice().sort((a,b)=>ls(b)-ls(a));
-  const median=(arr=>{const a=arr.map(ls).sort((x,y)=>x-y);return a.length?a[Math.floor(a.length/2)]:0;})(alive);
-  const recentDied=dead.filter(r=>r.histories&&r.histories.length&&(r.last_seen>=shiftDate(-3)));
-  return {recs,alive,dead,buckets,keys,top:sorted.slice(0,10),median,recentDied,
-          updated:state.db.updated||state.db.generated||(alive[0]&&alive[0].last_seen)||"—",
-          stableN:alive.filter(r=>ls(r)>=30).length};
+  const bi=d=>d>=365?5:d>=180?4:d>=90?3:d>=30?2:d>=7?1:0;
+  alive.forEach(r=>buckets[keys[bi(lifespan(r))]][0]++);
+  dead.forEach(r=>buckets[keys[bi(lifespan(r))]][1]++);
+  const top=alive.slice().sort((a,b)=>lifespan(b)-lifespan(a)).slice(0,10);
+  const arr=alive.map(lifespan).sort((x,y)=>x-y);
+  const median=arr.length?arr[Math.floor(arr.length/2)]:0;
+  const recentDied=dead.filter(r=>r.histories&&r.histories.length&&r.last_seen>=shiftDate(-3));
+  const cats={};recs.forEach(r=>{if(r.alive){const c=r.category||"Разное";cats[c]=(cats[c]||0)+1;}});
+  return {recs,alive,dead,buckets,keys,top,median,recentDied,cats,
+    updated:state.db.updated||state.db.generated||"—",
+    stableN:alive.filter(r=>lifespan(r)>=30).length,
+    reborn:recs.filter(r=>histLen(r)>0).length};
 }
-function shiftDate(days){const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
+function sparkline(vals,w=64,h=22,color="var(--accent)"){
+  if(!vals||vals.length<2)return "";const max=Math.max(...vals,1);
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1))*w},${h-v/max*(h-3)-1.5}`).join(" ");
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" opacity=".8"/></svg>`;
+}
 function renderOverview(){
   const s=computeStats();
-  document.getElementById("hdr-updated").textContent="данные от: "+fmtDate(typeof s.updated==="string"&&s.updated.length===10?s.updated:todayISO());
-  document.getElementById("ovCards").innerHTML=`
-    <div class="card blue"><div class="num">${s.recs.length}</div><div class="lbl">Всего ссылок в базе</div></div>
-    <div class="card green"><div class="num">${s.alive.length}</div><div class="lbl">Активных сейчас</div></div>
-    <div class="card red"><div class="num">${s.dead.length}</div><div class="lbl">Умерших</div></div>
-    <div class="card blue"><div class="num">${s.stableN}</div><div class="lbl">Стабильных (≥30 дн.)</div></div>
-    <div class="card yellow"><div class="num">${s.median}</div><div class="lbl">Медиана жизни, дн.</div></div>`;
+  $("hdr-updated").textContent="данные от: "+fmtDate(typeof s.updated==="string"&&s.updated.length===10?s.updated:todayISO());
+  // мини-спарклайн: появления новых ссылок по месяцам из first_seen
+  const months=Array.from({length:12},(_,i)=>shiftDate(-30*(11-i)).slice(0,7));
+  const cnt={};months.forEach(m=>cnt[m]=0);
+  dbRecords().forEach(r=>{const m=(r.first_seen||"").slice(0,7);if(cnt[m]!=null)cnt[m]++;});
+  const spk=months.map(m=>cnt[m]);
+  $("tc-all").textContent=s.recs.length;$("tc-alive").textContent=s.alive.length;
+  const cards=[
+    ["blue",s.recs.length,"Всего ссылок в базе",spk,"var(--accent)"],
+    ["green",s.alive.length,"Активных сейчас",null,null],
+    ["red",s.dead.length,"Умерших",null,null],
+    ["violet",s.stableN,"Стабильных ≥30 дн.",null,null],
+    ["yellow",s.median,"Медиана жизни, дн.",null,null],
+    ["blue",s.reborn.length,"Возрождённых (↺)",null,null],
+  ];
+  $("ovCards").innerHTML=cards.map(([c,n,l,sp,col])=>`<div class="card ${c}">${sp?sparkline(sp,64,22,col):""}<div class="num" data-count="${n}">0</div><div class="lbl">${l}</div></div>`).join("");
+  document.querySelectorAll("[data-count]").forEach(el=>animateCount(el,+el.dataset.count));
   const max=Math.max(...s.keys.map(k=>Math.max(...s.buckets[k])),1);
-  document.getElementById("ovHist").innerHTML=s.keys.map(k=>{
-    const [a,d]=s.buckets[k];
-    return `<div style="display:flex;align-items:center;gap:8px;margin:6px 0">
-      <span style="width:70px;color:var(--muted);font-size:12px">${k}</span>
+  $("ovHist").innerHTML=s.keys.map(k=>{const[a,d]=s.buckets[k];
+    return `<div style="display:flex;align-items:center;gap:8px;margin:7px 0">
+      <span style="width:64px;color:var(--muted);font-size:11px">${k}</span>
       <div style="flex:1;display:flex;gap:2px;align-items:center">
-        <i style="display:block;height:16px;width:${a/max*100}%;background:var(--green);border-radius:3px"></i>
-        <i style="display:block;height:16px;width:${d/max*100}%;background:var(--red);border-radius:3px"></i>
+        <i style="display:block;height:15px;width:${a/max*100}%;background:linear-gradient(90deg,var(--green),#6be0a8);border-radius:4px;transition:width .8s"></i>
+        <i style="display:block;height:15px;width:${d/max*100}%;background:var(--red);border-radius:4px;opacity:.75;transition:width .8s"></i>
       </div>
-      <span class="mono" style="width:70px;font-size:12px">${a} живых · ${d} мёртв</span></div>`;}).join("");
-  document.getElementById("ovTop").innerHTML=s.top.map(r=>`<tr>
-      <td>${esc(r.name)}</td><td class="mono" style="color:var(--muted)">${esc(r.category)}</td>
-      <td><b style="color:var(--green)">${lifespan(r)} дн.</b></td><td class="hint">${fmtDate(r.current_birth)}</td></tr>`).join("")||`<tr><td class="empty">нет активных</td></tr>`;
-  document.getElementById("ovEvents").innerHTML = s.recentDied.length
-    ? "За последние 3 дня объявлены умершими:<br>"+s.recentDied.map(r=>`<span class="chip dead">✝ ${esc(r.name)} (${lifespan(r)} дн.)</span>`).join(" ")
+      <span class="mono hide-sm" style="width:96px;font-size:11px">${a} живых · ${d} мёртв</span></div>`;}).join("");
+  const maxTop=s.top.length?lifespan(s.top[0]):1;
+  $("ovTop").innerHTML=s.top.map((r,i)=>`<tr>
+      <td>${i+1}. ${r.logo?'<img src="'+esc(r.logo)+'" style="width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:6px;border-radius:5px" onerror="this.style.display=\'none\'">':""}<b>${esc(r.name)}</b></td>
+      <td class="mono hint hide-sm">${esc(r.category)}</td>
+      <td><b style="color:var(--green)">${lifespan(r)} дн.</b><div class="lifespan-bar"><i style="width:${lifespan(r)/maxTop*100}%"></i></div></td></tr>`).join("")||'<tr><td class="empty">нет активных</td></tr>';
+  $("ovTopM").innerHTML=s.top.map((r,i)=>`<div class="mcard"><div class="mc-head"><span class="mono hint">#${i+1}</span><span class="mc-title">${esc(r.name)}</span><b style="color:var(--green);white-space:nowrap">${lifespan(r)} дн.</b></div>
+    <div class="mc-cat">${esc(r.category)}</div><div class="lifespan-bar" style="width:100%"><i style="width:${lifespan(r)/maxTop*100}%"></i></div></div>`).join("");
+  // категории stacked bar
+  const cats=Object.entries(s.cats).sort((a,b)=>b[1]-a[1]);const tot=cats.reduce((x,[,n])=>x+n,0)||1;
+  const palette=["#4da3ff","#9d6bff","#37d6e0","#3ecf8e","#ffc94d","#ff6b6b","#f78fb3","#7bed9f","#70a1ff","#eccc68"];
+  $("ovCmp").innerHTML=cats.slice(0,10).map(([c,n],i)=>`<div style="flex-grow:${n};background:${palette[i%10]}" title="${esc(c)}: ${n}"><span class="hide-sm">${n>tot*.05?esc(c.replace(/^\S+\s/,"")).slice(0,12):""}</span></div>`).join("");
+  $("ovLegend").innerHTML=cats.slice(0,10).map(([c,n],i)=>`<span class="chip" style="background:${palette[i%10]}22;color:${palette[i%10]}">● ${esc(c)} · ${n}</span>`).join(" ");
+  $("ovEvents").innerHTML=s.recentDied.length
+    ? "За последние 3 дня объявлены умершими:<br>"+s.recentDied.slice(0,30).map(r=>`<span class="chip dead">✝ ${esc(r.name)} (${lifespan(r)} дн.)</span>`).join(" ")
     : "Недавних смертей трансляций нет. База обновляется ежедневно workflow'ом.";
 }
 
 /* ================= РЕНДЕР: ТРАНСЛЯЦИИ ================= */
 function streamRows(){
-  const q=document.getElementById("stSearch").value.toLowerCase();
-  const st=document.getElementById("stStatus").value;
-  const cat=document.getElementById("stCat").value;
-  const noL=document.getElementById("stChkNoLogo").checked&&!document.getElementById("stChkWithLogo").checked;
-  const withL=document.getElementById("stChkWithLogo").checked;
+  const q=$("stSearch").value.toLowerCase();
+  const st=$("stStatus").value;
+  const cat=$("stCat").value;
+  const noL=$("stChkNoLogo").checked&&!$("stChkWithLogo").checked;
+  const withL=$("stChkWithLogo").checked;
   let rows=dbRecords().map(r=>({...r,lifespan:lifespan(r)}));
   if(q)rows=rows.filter(r=>(r.name||"").toLowerCase().includes(q)||(r.url||"").toLowerCase().includes(q));
   if(st==="alive")rows=rows.filter(r=>r.alive);
   if(st==="dead")rows=rows.filter(r=>!r.alive);
   if(st==="stable")rows=rows.filter(r=>r.alive&&r.lifespan>=30);
   if(st==="young")rows=rows.filter(r=>r.alive&&r.lifespan<30);
+  if(st==="reborn")rows=rows.filter(r=>histLen(r)>0);
   if(cat)rows=rows.filter(r=>r.category===cat);
   if(noL)rows=rows.filter(r=>!r.logo);
   if(withL)rows=rows.filter(r=>!!r.logo);
-  const {key,asc}=state.stSort;
+  const{key,asc}=state.stSort;
   rows.sort((a,b)=>{let x=a[key]??"",y=b[key]??"";
     if(key==="status"){x=a.alive?1:0;y=b.alive?1:0;}
     return (typeof x==="number"&&typeof y==="number"?x-y:String(x).localeCompare(String(y),"ru"))*(asc?1:-1);});
   return rows;
 }
+function statusChip(r){
+  return r.alive?(r.lifespan>=30?'<span class="chip stable">⚓ стабильная</span>':'<span class="chip warn">🌱 молодая</span>'):'<span class="chip dead">✝ умерла</span>'
+    +(histLen(r)?` <span class="chip violet" title="${histLen(r)} заверш. периодов в архиве">↺${histLen(r)}</span>`:"")
+    +(isExcluded(r.url)?' <span class="chip dead">🚫 искл.</span>':"");
+}
+function actionsHtml(r){
+  const excl=isExcluded(r.url);
+  const u=JSON.stringify(r.url).replace(/"/g,"&quot;");
+  return `<button class="sm" title="Копировать URL" onclick="copyText(${u})">📋</button>
+    <button class="sm" title="История периодов жизни" onclick="showHistory('${esc(r.id||r.url)}')">🕰</button>
+    <button class="sm ${excl?'':'danger'}" title="${excl?'Вернуть':'Исключить'}" onclick="toggleExclude('${esc(r.url)}')">${excl?"↩":"🚫"}</button>`;
+}
 function renderStreams(){
   const cats=[...new Set(dbRecords().map(r=>r.category).filter(Boolean))].sort();
-  const catSel=document.getElementById("stCat");
-  if(catSel.options.length<=1) cats.forEach(c=>catSel.add(new Option(c,c)));
+  const catSel=$("stCat");const cur=catSel.value;
+  catSel.innerHTML='<option value="">Все категории</option>'+cats.map(c=>`<option value="${esc(c)}" ${c===cur?"selected":""}>${esc(c)}</option>`).join("");
   const rows=streamRows();
-  const size=+document.getElementById("stPageSize").value;
+  const size=+$("stPageSize").value;
   const pages=Math.max(1,Math.ceil(rows.length/size));
   state.stPageNum=Math.min(state.stPageNum,pages-1);
   const slice=rows.slice(state.stPageNum*size,(state.stPageNum+1)*size);
   const maxLife=Math.max(...rows.map(r=>r.lifespan),1);
-  document.getElementById("stBody").innerHTML=slice.map(r=>{
-    const excl=isExcluded(r.url);
-    const chips=(r.alive?(r.lifespan>=30?'<span class="chip stable">стабильная</span>':'<span class="chip warn">молодая</span>'):'<span class="chip dead">умерла</span>')
-      +(excl?' <span class="chip dead">исключена</span>':"");
-    return `<tr>
-      <td><b>${r.logo?'<img src="'+esc(r.logo)+'" style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:6px" onerror="this.style.display=\'none\'">':""}${esc(r.name)}</b></td>
-      <td class="hint">${esc(r.category)}</td>
-      <td class="urlcell"><a href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(r.url)}">${esc(r.url)}</a></td>
+  $("stBody").innerHTML=slice.map(r=>`<tr>
+      <td><b>${r.logo?'<img src="'+esc(r.logo)+'" style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:6px;border-radius:5px" onerror="this.style.display=\'none\'">':""}${esc(r.name)}</b></td>
+      <td class="hint hide-sm">${esc(r.category)}</td>
+      <td class="urlcell hide-sm"><a href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(r.url)}">${esc(r.url)}</a></td>
       <td><b>${r.lifespan}</b> дн.<div class="lifespan-bar"><i style="width:${r.lifespan/maxLife*100}%"></i></div></td>
-      <td class="hint">${fmtDate(r.current_birth||r.first_seen)}</td>
-      <td class="hint">${fmtDate(r.last_seen)}</td>
-      <td class="hint">${r.appearances||1}${histLen(r)?' <span class="chip warn" title="возвращалась после смерти: '+histLen(r)+' заверш. периодов">↺'+histLen(r)+"</span>":""}</td>
-      <td>${chips}</td>
-      <td style="white-space:nowrap">
-        <button title="Копировать URL" onclick="copyText(${JSON.stringify(r.url).replace(/"/g,'&quot;')})">📋</button>
-        <button title="Показать историю периодов жизни" onclick="showHistory('${esc(r.id||r.url)}')">🕰</button>
-        <button class="${excl?'':'danger'}" title="${excl?'Вернуть в плейлисты':'Исключить из плейлистов'}" onclick="toggleExclude('${esc(r.url)}')">${excl?"↩":"🚫"}</button>
-      </td></tr>`;}).join("")||`<tr><td colspan="9" class="empty">Ничего не найдено</td></tr>`;
-  document.getElementById("stCount").textContent=rows.length+" записей";
-  document.getElementById("stPageLbl").textContent=` стр. ${state.stPageNum+1}/${pages}`;
+      <td class="hint hide-sm">${fmtDate(r.current_birth||r.first_seen)}</td>
+      <td class="hint hide-sm">${fmtDate(r.last_seen)}</td>
+      <td class="hint hide-sm">${r.appearances||1}</td>
+      <td>${statusChip(r)}</td>
+      <td style="white-space:nowrap">${actionsHtml(r)}</td></tr>`).join("")||'<tr><td colspan="9" class="empty">Ничего не найдено</td></tr>';
+  $("stBodyM").innerHTML=slice.map(r=>`<div class="mcard ${isExcluded(r.url)?"excl":""}">
+      <div class="mc-head">
+        ${r.logo?'<img src="'+esc(r.logo)+'" style="width:32px;height:32px;object-fit:contain;border-radius:8px;background:var(--panel2)" onerror="this.style.display=\'none\'">':'<span style="font-size:26px">📺</span>'}
+        <div style="flex:1;min-width:0"><div class="mc-title">${esc(r.name)}</div><div class="mc-cat">${esc(r.category)}</div></div>
+        <div style="text-align:right"><b style="font-size:17px;color:${r.alive?"var(--green)":"var(--red)"}">${r.lifespan}</b><div class="mc-cat">дней</div></div>
+      </div>
+      <div class="lifespan-bar" style="width:100%"><i style="width:${r.lifespan/maxLife*100}%"></i></div>
+      <a class="mc-url" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>
+      <div class="mc-stats">
+        <span>старт: <b>${fmtDate(r.current_birth||r.first_seen)}</b></span>
+        <span>видна: <b>${fmtDate(r.last_seen)}</b></span>
+        <span>появл.: <b>${r.appearances||1}</b></span>
+      </div>
+      <div style="margin-top:6px">${statusChip(r)}</div>
+      <div class="mc-actions">${actionsHtml(r)}</div>
+    </div>`).join("")||'<div class="empty">Ничего не найдено</div>';
+  $("stCount").textContent=rows.length+" записей";
+  $("stPageLbl").textContent=` стр. ${state.stPageNum+1}/${pages}`;
 }
-function stPage(d){state.stPageNum+=d;renderStreams();}
+function stPage(d){const pages=parseInt(($("stPageLbl").textContent.match(/\/(\d+)/)||[,1])[1]);
+  state.stPageNum=Math.max(0,Math.min(pages-1,state.stPageNum+d));renderStreams();}
 document.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
   const k=th.dataset.k;
   if(state.stSort.key===k)state.stSort.asc=!state.stSort.asc;else{state.stSort.key=k;state.stSort.asc=false;}
   document.querySelectorAll("th[data-k]").forEach(t=>t.classList.remove("sorted","asc"));
   th.classList.add("sorted");if(state.stSort.asc)th.classList.add("asc");
   renderStreams();});
-["stSearch","stStatus","stCat","stChkNoLogo","stChkWithLogo"].forEach(id=>document.getElementById(id).addEventListener("input",()=>{state.stPageNum=0;renderStreams();}));
+["stSearch","stStatus","stCat","stChkNoLogo","stChkWithLogo"].forEach(id=>$(id).addEventListener("input",()=>{state.stPageNum=0;renderStreams();
+  if(id==="stStatus")document.querySelectorAll(".qchip").forEach(c=>c.classList.toggle("on",c.dataset.q===$(id).value));}));
+document.querySelectorAll(".qchip").forEach(c=>c.onclick=()=>{
+  document.querySelectorAll(".qchip").forEach(x=>x.classList.remove("on"));c.classList.add("on");
+  $("stStatus").value=c.dataset.q;state.stPageNum=0;renderStreams();});
 
+/* ================= ИСТОРИЯ (таймлайн) ================= */
 function showHistory(idOrUrl){
-  const recs=dbRecords();
-  const r=recs.find(x=>x.id===idOrUrl||x.url===idOrUrl);
-  if(!r)return;
-  const lines=[`Канал: ${r.name}`,`URL: ${r.url}`,`Первое появление: ${fmtDate(r.first_seen)}`,`Текущий период: с ${fmtDate(r.current_birth||r.first_seen)} (${lifespan(r)} дн., ${r.alive?"активен":"завершён"})`,
-    "Завершённые периоды жизни:",...(r.histories||[]).map(h=>`  • ${fmtDate(h.start)} → ${fmtDate(h.end)} = ${h.days} дн.`)];
-  alert(lines.join("\n"));
+  const r=dbRecords().find(x=>x.id===idOrUrl||x.url===idOrUrl);
+  if(!r)return;state.histRec=r;
+  $("hmName").textContent=r.name||"(без имени)";
+  try{$("hmHost").textContent=new URL(r.url).host;}catch(e){$("hmHost").textContent=r.url;}
+  $("hmOpen").href=r.url;
+  const lg=$("hmLogo");if(r.logo){lg.src=r.logo;lg.hidden=false;lg.onerror=()=>lg.hidden=true;}else lg.hidden=true;
+  const eb=$("hmExclBtn");eb.textContent=isExcluded(r.url)?"↩ Вернуть в плейлисты":"🚫 Исключить";
+  eb.onclick=()=>{toggleExclude(r.url);showHistory(idOrUrl);};
+  const ls=lifespan(r);
+  let tl="";
+  if(r.alive)tl+=`<div class="tl-item now"><span class="tl-days">${ls} дн.</span> — текущий активный период<br><span class="hint">${fmtDate(r.current_birth||r.first_seen)} → сейчас · первое появление ${fmtDate(r.first_seen)}</span></div>`;
+  else tl+=`<div class="tl-item dead"><span class="tl-days">${ls} дн.</span> — последний период завершён<br><span class="hint">${fmtDate((r.histories||[]).length?r.histories[r.histories.length-1].start:(r.current_birth||r.first_seen))} → ${fmtDate(r.last_seen)} (умерла)</span></div>`;
+  (r.histories||[]).slice(0,-1).reverse().forEach(h=>{
+    tl+=`<div class="tl-item dead"><span class="tl-days">${h.days} дн.</span> — завершённый период<br><span class="hint">${fmtDate(h.start)} → ${fmtDate(h.end)}</span></div>`;});
+  tl+=`<div class="tl-item"><b>🕳 Первое появление:</b> ${fmtDate(r.first_seen)} · всего появлений: ${r.appearances||1}</div>`;
+  $("hmTimeline").innerHTML=tl;
+  $("histModal").classList.add("open");
 }
 function toggleExclude(url){
   const i=state.edits.excluded.indexOf(url);
@@ -461,7 +781,7 @@ function toggleExclude(url){
   saveEdits();renderStreams();renderPlaylists();
 }
 
-/* ================= ГЕНЕРАЦИЯ STABLE.M3U ================= */
+/* ================= STABLE.M3U ================= */
 function buildStableFromDb(){
   const recs=dbRecords().filter(r=>r.alive&&lifespan(r)>=30&&!isExcluded(r.url));
   recs.sort((a,b)=>lifespan(b)-lifespan(a));
@@ -470,21 +790,26 @@ function buildStableFromDb(){
     const attrs=[r["tvg-id"]?`tvg-id="${r["tvg-id"]}"`:r.tvg_id?`tvg-id="${r.tvg_id}"`:"",
       r.name?`tvg-name="${r.name.replace(/"/g,"'")}"`:"",
       `group-title="${(r.category||"Разное").replace(/"/g,"'")}"`,
-      r.logo?`tvg-logo="${r.logo}"`:"",`tvg-lifetime="${lifespan(r)}"`].filter(Boolean).join(" ");
+      r.logo?`tvg-logo="${r.logo}"`:"".trim(),`tvg-lifetime="${lifespan(r)}"`].filter(Boolean).join(" ");
     out+=`# LIVE-DAYS: ${lifespan(r)} | SINCE: ${r.current_birth||r.first_seen} | APPEARANCES: ${r.appearances||1}\n`;
     out+=`#EXTINF:-1 ${attrs},${r.name}\n${r.url}\n`;
   }
   return out;
 }
-function downloadStableFromDb(){downloadText(buildStableFromDb(),"stable.m3u");toast("stable.m3u собран из базы с учётом исключений","ok");}
+function downloadStableFromDb(){
+  if(!state.db)return toast("Сначала загрузите базу","err");
+  downloadText(buildStableFromDb(),"stable.m3u");
+  toast("stable.m3u собран из базы с учётом исключений","ok");celebrate();
+}
 
 /* ================= РЕНДЕР: ИСТОЧНИКИ ================= */
 function renderSources(){
   const p=state.parsed;
-  document.getElementById("srcComments").value=p.comments;
+  $("srcComments").value=p.comments;
   const mkRow=(u,i,arr)=>`<div class="rowlist"><input type="text" value="${esc(u)}" onchange="state.parsed.${arr}[${i}]=this.value;refreshSrcPreview()"><button class="rm" onclick="state.parsed.${arr}.splice(${i},1);renderSources()">✕</button></div>`;
-  document.getElementById("srcManual").innerHTML=p.manual.map((u,i)=>mkRow(u,i,"manual")).join("")||'<p class="hint">Список пуст</p>';
-  document.getElementById("srcAutoList").innerHTML=p.auto.map(u=>`<label class="rowlist" style="margin:0">
+  $("srcManual").innerHTML=p.manual.map((u,i)=>mkRow(u,i,"manual")).join("")||'<p class="hint">Список пуст</p>';
+  const af=($("srcAutoFilter").value||"").toLowerCase();
+  $("srcAutoList").innerHTML=p.auto.filter(u=>!af||u.toLowerCase().includes(af)).map(u=>`<label class="rowlist" style="margin:0">
       <input type="checkbox" ${p.excluded.includes(u)?"checked":""} onchange="toggleAutoExcl('${esc(u)}',this.checked)">
       <span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</span></label>`).join("")||'<p class="hint">Авто-источники появятся после первого запуска workflow</p>';
   refreshSrcPreview();
@@ -495,23 +820,23 @@ function toggleAutoExcl(u,chk){
   renderSources();
 }
 function addSource(kind){
-  const inp=document.getElementById("srcNewUrl");const v=inp.value.trim();
+  const inp=$("srcNewUrl");const v=inp.value.trim();
   if(!v.startsWith("http"))return toast("Введите корректный http(s) URL","err");
-  state.parsed.manual.push(v);inp.value="";renderSources();toast("Источник добавлен","ok");
+  state.parsed.manual.push(v);inp.value="";renderSources();toast("Источник добавлен","ok");celebrate();
 }
 function refreshSrcPreview(){
-  state.parsed.comments=document.getElementById("srcComments").value;
+  state.parsed.comments=$("srcComments").value;
   state.playlistSources=buildPlayList();
-  document.getElementById("srcPreview").value=state.playlistSources;
+  $("srcPreview").value=state.playlistSources;
 }
 function parsePlayListPrompt(){
-  const t=document.getElementById("srcPreview").value||prompt("Вставьте содержимое play.list:");
+  const t=$("srcPreview").value||prompt("Вставьте содержимое play.list:");
   if(!t)return;parsePlayList(t);renderSources();toast("play.list импортирован","ok");
 }
 
 /* ================= РЕНДЕР: ПЛЕЙЛИСТЫ ================= */
 function parseM3u(txt){
-  const out=[];let cur=null;let idx=0;
+  const out=[];let cur=null,idx=0;
   txt.split(/\r?\n/).forEach(line=>{
     line=line.trim();
     if(line.startsWith("#EXTINF")){
@@ -526,29 +851,38 @@ function parseM3u(txt){
   return out;
 }
 function currentPlItems(){
-  const sel=document.getElementById("plSel").value;
+  const sel=$("plSel").value;
   if(sel==="custom")return state.customM3u||[];
   const txt=sel==="stable"?(state.stableM3u||buildStableFromDb()):state.fullM3u;
   return parseM3u(txt||"");
 }
 function renderPlaylists(){
   const items=currentPlItems();
-  const gsel=document.getElementById("plGroup");
+  const gsel=$("plGroup");
   const groups=[...new Set(items.map(i=>i.group).filter(Boolean))].sort();
-  if(gsel.options.length<=1)groups.forEach(g=>gsel.add(new Option(g,g)));
-  const q=document.getElementById("plSearch").value.toLowerCase();
-  const g=gsel.value;
+  const cur=gsel.value;
+  gsel.innerHTML='<option value="">Все группы</option>'+groups.map(g=>`<option value="${esc(g)}" ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
+  const q=$("plSearch").value.toLowerCase(),g=gsel.value;
   const filtered=items.filter(i=>(!q||((i.name||"")+(i.url||"")+(i.group||"")).toLowerCase().includes(q))&&(!g||i.group===g));
-  document.getElementById("plVisible").textContent="показано: "+filtered.length+" / "+items.length;
-  document.getElementById("plBody").innerHTML=filtered.slice(0,800).map(i=>{
+  $("plVisible").textContent="показано: "+filtered.length+" / "+items.length;
+  const shown=filtered.slice(0,800);
+  $("plBody").innerHTML=shown.map(i=>{
     const ex=i.url&&isExcluded(i.url);
     return `<tr style="${ex?"opacity:.45":""}">
       <td><input type="checkbox" class="plChk" data-url="${esc(i.url||"")}" ${ex?"checked":""}></td>
-      <td class="hint">${i.idx}</td><td>${i.logo?'<img src="'+esc(i.logo)+'" style="width:20px;height:20px;object-fit:contain;margin-right:6px" onerror="this.style.display=\'none\'">':''}${esc(i.name)}</td>
-      <td class="hint">${esc(i.group)}</td><td class="mono hint">${esc(i.tvgId)}</td>
-      <td class="urlcell"><a href="${esc(i.url)}" target="_blank">${esc(i.url)}</a></td></tr>`;}).join("")
+      <td class="hint">${i.idx}</td><td>${i.logo?'<img src="'+esc(i.logo)+'" style="width:20px;height:20px;object-fit:contain;margin-right:6px;border-radius:5px" onerror="this.style.display=\'none\'">':""}${esc(i.name)}</td>
+      <td class="hint hide-sm">${esc(i.group)}</td><td class="mono hint hide-sm">${esc(i.tvgId)}</td>
+      <td class="urlcell hide-sm"><a href="${esc(i.url)}" target="_blank">${esc(i.url)}</a></td></tr>`;}).join("")
     +(filtered.length>800?'<tr><td colspan="6" class="hint">…показаны первые 800, уточните фильтр</td></tr>':"")
     ||'<tr><td colspan="6" class="empty">Нет данных — загрузите набор или откройте файл</td></tr>';
+  $("plBodyM").innerHTML=shown.map(i=>{
+    const ex=i.url&&isExcluded(i.url);
+    return `<div class="mcard ${ex?"excl":""}">
+      <div class="mc-head"><input type="checkbox" class="plChk" data-url="${esc(i.url||"")}" ${ex?"checked":""} style="width:20px;height:20px;flex-shrink:0">
+      ${i.logo?'<img src="'+esc(i.logo)+'" style="width:30px;height:30px;object-fit:contain;border-radius:7px;background:var(--panel2)" onerror="this.style.display=\'none\'">':""}
+      <div style="flex:1;min-width:0"><div class="mc-title">${esc(i.name)}</div><div class="mc-cat">${esc(i.group)} · #${i.idx}</div></div></div>
+      <a class="mc-url" href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.url)}</a></div>`;}).join("")
+    ||'<div class="empty">Нет данных</div>';
 }
 function selectAllInFilter(v){document.querySelectorAll(".plChk").forEach(c=>c.checked=v);}
 function removeSelectedFromPlaylist(){
@@ -556,43 +890,97 @@ function removeSelectedFromPlaylist(){
   if(!urls.length)return toast("Ничего не выбрано","err");
   urls.forEach(u=>{if(!isExcluded(u))state.edits.excluded.push(u);});
   saveEdits();renderPlaylists();renderStreams();
-  toast(`Помечено как исключённое: ${urls.length}. Скачайте edited.m3u или stable.m3u.`,"ok");
+  toast(`Помечено как исключённое: ${urls.length}. Скачайте edited.m3u.`,"ok");
 }
 function downloadCurrentPlaylist(){
-  const sel=document.getElementById("plSel").value;
-  if(sel==="stable"){downloadStableFromDb();return;}
+  if($("plSel").value==="stable"){downloadStableFromDb();return;}
   const items=currentPlItems().filter(i=>!(i.url&&isExcluded(i.url)));
   const txt="#EXTM3U\n"+items.map(i=>(i.line?i.line+"\n":"#EXTINF:-1,"+i.name+"\n")+i.url).join("\n")+"\n";
-  downloadText(txt,"edited.m3u");toast("edited.m3u скачан ("+items.length+" каналов)","ok");
+  downloadText(txt,"edited.m3u");toast("edited.m3u скачан ("+items.length+" каналов)","ok");celebrate();
 }
-["plSel","plSearch","plGroup"].forEach(id=>document.getElementById(id).addEventListener("input",renderPlaylists));
-document.getElementById("plFile").addEventListener("change",async ev=>{
+["plSel","plSearch","plGroup"].forEach(id=>$(id).addEventListener("input",renderPlaylists));
+$("plFile").addEventListener("change",async ev=>{
   const f=ev.target.files[0];if(!f)return;
   state.customM3u=parseM3u(await f.text());
-  document.getElementById("plSel").value="custom";renderPlaylists();toast("Загружен пользовательский M3U: "+f.name,"ok");
+  $("plSel").value="custom";renderPlaylists();toast("Загружен пользовательский M3U: "+f.name,"ok");
 });
 
 /* ================= ЭКСПОРТ ВСЕГО ================= */
 function exportAll(){
   if(!state.db)return toast("Сначала загрузите stable_streams.json","err");
   refreshSrcPreview();
-  downloadText(JSON.stringify(state.db,null,2).replace(/[\u0080-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0")),"stable_streams.json");
+  downloadText(JSON.stringify(state.db,null,2),"stable_streams.json");
   setTimeout(()=>downloadText(buildStableFromDb(),"stable.m3u"),300);
   setTimeout(()=>downloadText(state.playlistSources,"play.list"),600);
-  toast("Скачаны stable_streams.json + stable.m3u + play.list. Закоммитьте их в репозиторий.","ok");
+  toast("Скачаны stable_streams.json + stable.m3u + play.list. Закоммитьте их в репозиторий.","ok");celebrate();
 }
 
-/* ================= ТАБЫ / INIT ================= */
-document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
+/* ================= МЕНЮ / ТАБЫ ================= */
+$("btnMenu").onclick=e=>{e.stopPropagation();$("menuPop").classList.toggle("open");};
+document.addEventListener("click",e=>{if(!e.target.closest("#menuPop")&&!e.target.closest("#btnMenu"))closeMenu();});
+function closeMenu(){$("menuPop").classList.remove("open");}
+function showHelp(){$("helpModal").classList.add("open");closeMenu();}
+function switchTab(name){
+  if(!$("tab-"+name))name="overview";
+  document.querySelectorAll(".tabbtn,.bn[data-tab]").forEach(x=>x.classList.toggle("active",x.dataset.tab===name));
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  b.classList.add("active");document.getElementById("tab-"+b.dataset.tab).classList.add("active");
+  $("tab-"+name).classList.add("active");
+  history.replaceState(null,"","#"+name);
+  scrollTo({top:0,behavior:motion?"smooth":"auto"});
+}
+document.querySelectorAll(".tabbtn,.bn[data-tab]").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+
+/* прогресс-бар скролла */
+addEventListener("scroll",()=>{const h=document.documentElement;
+  $("progress").style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight||1)*100)+"%";},{passive:true});
+
+/* pull-to-refresh (только сверху страницы, моб.) */
+let ptrY=null;
+addEventListener("touchstart",e=>{if(scrollY<=0&&isMobile())ptrY=e.touches[0].clientY;},{passive:true});
+addEventListener("touchmove",e=>{if(ptrY==null)return;const dy=e.touches[0].clientY-ptrY;
+  if(dy>0&&scrollY<=0){$("ptr").style.display="block";$("ptr").classList.toggle("go",dy>70);}}, {passive:true});
+addEventListener("touchend",e=>{if(ptrY!=null&&$("ptr").classList.contains("go")){loadDataset($("datasetSel").value||"own");}
+  ptrY=null;if($("ptr"))setTimeout(()=>$("ptr").style.display="none",600);},{passive:true});
+
+/* горячие клавиши */
+addEventListener("keydown",e=>{
+  if(e.target.matches("input,textarea,select")){if(e.key==="Escape")e.target.blur();return;}
+  const k=e.key.toLowerCase();
+  if(k==="/"){e.preventDefault();switchTab("streams");$("stSearch").focus();}
+  else if(k>="1"&&k<="4"){switchTab(["overview","streams","sources","playlists"][+k-1]);}
+  else if(k==="t")toggleTheme();
+  else if(k==="r")loadDataset($("datasetSel").value||"own");
+  else if(e.key==="Escape"){document.querySelectorAll(".modal.open").forEach(m=>m.classList.remove("open"));closeMenu();}
+  else if(e.key==="ArrowLeft")stPage(-1);
+  else if(e.key==="ArrowRight")stPage(1);
 });
+
+/* swipe между вкладками на мобильных */
+let swX=null,swY=null;
+addEventListener("touchstart",e=>{if(isMobile()){swX=e.touches[0].clientX;swY=e.touches[0].clientY;}},{passive:true});
+addEventListener("touchend",e=>{
+  if(swX==null||!isMobile())return;
+  const dx=e.changedTouches[0].clientX-swX,dy=e.changedTouches[0].clientY-swY;swX=null;
+  if(Math.abs(dx)>90&&Math.abs(dy)<60&&scrollY<120){
+    const tabs=["overview","streams","sources","playlists"];
+    const cur=tabs.findIndex(t=>$("tab-"+t).classList.contains("active"));
+    const next=Math.max(0,Math.min(3,cur+(dx<0?1:-1)));
+    if(next!==cur)switchTab(tabs[next]);
+  }},{passive:true});
+
+/* ================= ОБЩИЙ REFRESH ================= */
 function refreshAll(){
-  if(!state.db){document.getElementById("ovCards").innerHTML='<div class="card"><div class="lbl">Нет данных. Загрузите набор данных кнопкой сверху или откройте stable_streams.json локально.</div></div>';return;}
+  if(!state.db){
+    const msg='<div class="card"><div class="lbl">Нет данных. Загрузите набор кнопкой ⟳ сверху, через меню «⋯» или откройте stable_streams.json локально.</div></div>';
+    $("ovCards").innerHTML=msg;return;
+  }
   renderOverview();renderStreams();renderSources();renderPlaylists();
 }
+
+/* ================= INIT ================= */
 fillDatasetSelect();
+applyMotion();
+if(location.hash)switchTab(location.hash.slice(1));
 // автозагрузка файлов, лежащих рядом со страницей (GitHub Pages / локальный http-сервер)
 if(location.protocol!=="file:") loadDataset("own"); else refreshAll();
 </script>
