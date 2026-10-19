@@ -1,0 +1,46 @@
+name: 🐛 Сообщение об ошибке
+description: Неработающий канал, ошибка генерации или сбой дашборда
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за сообщение! Заполните поля ниже — так мы быстрее найдём причину.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло?
+      description: Описание проблемы (не работает канал, пустой плейлист, ошибка в CI и т.п.)
+      placeholder: Канал "Первый" не открывается ни в VLC, ни в Tivimate...
+    validations:
+      required: true
+  - type: input
+    id: channel
+    attributes:
+      label: Канал / ссылка из плейлиста
+      description: Имя канала и URL потока (если известно) — можно скопировать из playlist.m3u
+      placeholder: 'Первый / http://example.com/stream.ts'
+    validations:
+      required: false
+  - type: dropdown
+    id: where
+    attributes:
+      label: Где проявляется проблема?
+      options:
+        - playlist.m3u (итоговый плейлист)
+        - stable.m3u (стабильные ссылки)
+        - dashboard.html (веб-дашборд)
+        - GitHub Actions (автообновление)
+        - parser.py (локальный запуск)
+        - Другое
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи / скриншоты
+      description: Вставьте вывод консоли, ссылку на ранн Actions или скриншот ошибки
+      render: shell
+    validations:
+      required: false

@@ -1,0 +1,34 @@
+name: 💡 Предложение улучшения
+description: Новая категория, источник, функция дашборда или улучшение категоризации
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что предлагаете?
+      description: Максимально конкретно опишите идею и пользу от неё
+      placeholder: Добавить категорию "🎭 Театр и концерты" и ключевые слова для неё...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: К какой части относится?
+      options:
+        - Категоризация каналов
+        - Фильтрация / дедупликация
+        - Статистика жизни трансляций
+        - Дашборд (dashboard.html)
+        - Источники (play.list)
+        - CI / автоматизация
+        - Документация
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Примеры каналов / источников
+      description: Если предложение касается источников или категорий — приведите примеры
+    validations:
+      required: false
