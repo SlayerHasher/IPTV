@@ -23,8 +23,13 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
 
 # --- Внешний IPTV-хаб shirtv.uz (каталог готовых m3u-плейлистов) ---
-SHIRTV_INDEX_URL = "http://shirtv.uz/playlists.html"   # страница со списком плейлистов
-SHIRTV_BASE_URL = "http://shirtv.uz/"                  # база для относительных ссылок
+# Сайт лежит на https (http редиректит 301). Запрос идёт напрямую; если сайт
+# окажется недоступен (блокировки/таймауты в CI), включается запасной
+# read-туннель r.jina.ai.
+SHIRTV_INDEX_URL = "https://shirtv.uz/playlists.html"  # страница со списком плейлистов
+SHIRTV_BASE_URL = "https://shirtv.uz/"                 # база для относительных ссылок
+SHIRTV_TUNNEL_PREFIX = "https://r.jina.ai/"            # запасной read-прокси
+SHIRTV_USE_TUNNEL = True                               # False — только прямые запросы
 SHIRTV_MARKED_ONLY = True   # брать только плейлисты с бейджем "Свежий"/"Недавнее"
                             # (загруженные за последние ~7 дней); False — все 80+
 SHIRTV_MAX_PLAYLISTS = 25   # жёсткий лимит количества плейлистов за прогон
@@ -393,19 +398,37 @@ def find_github_playlists():
 def parse_playlists_html(html, base_url):
     """Универсальный разбор HTML-каталога плейлистов.
 
-    Понимает карточки в стиле shirtv.uz (data-url / href на .m3u), а также
-    обычные списки ссылок <a href="...m3u">. Возвращает dict {url: name}.
+    Понимает карточки в стиле shirtv.uz (<div class="playlist-card"> с
+    playlist-name / last-update-badge / href на .m3u), а также обычные
+    списки ссылок <a href="...m3u">. Возвращает dict {url: info}, где
+    info — dict {"name": str, "fresh": bool}.
     """
     found = {}
 
-    # 1) Карточки с data-url (shirtv.uz и подобные хабы)
-    for m in re.finditer(r'data-url="([^"]+\.m3u8?)"', html, re.I):
-        url = m.group(1).strip()
-        block = html[max(0, m.start() - 2500):m.start()]
-        nm = re.findall(r'playlist-name">([^<]+)<', block)
-        found.setdefault(url, nm[-1].strip() if nm else "")
+    # 1) Карточное представление (shirtv.uz и подобные хабы): режем HTML на
+    #    блоки <div class="playlist-card"...> и внутри каждого ищем имя,
+    #    бейдж свежести и ссылку на .m3u.
+    for cm in re.finditer(r'playlist-card\b[\s\S]*?(?=playlist-card\b|\Z)', html):
+        block = cm.group(0)
+        um = re.search(r'(?:data-url|href)="([^"]+\.m3u8?)"', block)
+        if not um:
+            continue
+        url = um.group(1).strip()
+        if url.startswith("//"):
+            url = "http:" + url
+        elif url.startswith("/"):
+            url = base_url.rstrip("/") + url
+        elif not re.match(r'^https?://', url):
+            url = base_url + url
+        nm = re.search(r'playlist-name">([^<]+)<', block)
+        fresh = bool(re.search(r'last-update-badge[^>]*update-(recent|fresh)', block))
+        prev = found.get(url)
+        found.setdefault(url, {"name": "", "fresh": False})
+        if nm and not found[url]["name"]:
+            found[url]["name"] = nm.group(1).strip()
+        found[url]["fresh"] = found[url]["fresh"] or fresh
 
-    # 2) Любые ссылки вида <a href="....m3u">
+    # 2) Любые ссылки вида <a href="....m3u"> (простые каталоги без карточек)
     for m in re.finditer(r'<a[^>]+href="([^"]+\.m3u8?)"', html, re.I):
         href = m.group(1).strip()
         if href.startswith("//"):
@@ -418,44 +441,61 @@ def parse_playlists_html(html, base_url):
         tag = re.search(r'<a[^>]*>(.*?)</a>', m.group(0), re.S | re.I)
         if tag:
             name = re.sub(r'<[^>]+>', '', tag.group(1)).strip()
-        found.setdefault(href, name)
+        found.setdefault(href, {"name": name, "fresh": False})
 
     return found
 
+
+def shirtv_fetch(url):
+    """Загрузка страницы каталога shirtv.uz с запасным read-туннелем.
+
+    Сначала пробуем прямой запрос (сайт обычно отвечает нормально), при
+    сетевой ошибке или пустом ответе — туннель r.jina.ai. Возвращает
+    текст страницы или None.
+    """
+    candidates = [(url, {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"})]
+    if SHIRTV_USE_TUNNEL:
+        candidates.append((SHIRTV_TUNNEL_PREFIX + url, {"User-Agent": "Mozilla/5.0"}))
+    for target, hdrs in candidates:
+        try:
+            resp = requests.get(target, timeout=30, allow_redirects=True, headers=hdrs)
+            resp.raise_for_status()
+            text = resp.text
+            # туннель может вернуть заглушку/ошибку без ссылок на .m3u
+            if ".m3u" in text or target == url:
+                via = "напрямую" if target == url else "через туннель r.jina.ai"
+                print(f"   📡 Каталог загружен {via} ({len(text)} симв.)")
+                return text
+            print("   ⚠️  Туннель вернул пустой ответ без ссылок .m3u...")
+        except requests.RequestException as e:
+            print(f"   ⚠️  Загрузка не удалась ({target[:60]}...): {e}")
+    return None
+
+
 def find_shirtv_playlists():
-    """Парсит каталог http://shirtv.uz/playlists.html и возвращает
+    """Парсит каталог shirtv.uz/playlists.html и возвращает
     множество прямых ссылок на m3u-плейлисты."""
     print(f"\n🌐 Поиск внешних плейлистов на {SHIRTV_INDEX_URL}...")
-    try:
-        resp = requests.get(SHIRTV_INDEX_URL, timeout=20, allow_redirects=True,
-                            headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"⚠️  Не удалось загрузить каталог shirtv.uz: {e}")
+    html = shirtv_fetch(SHIRTV_INDEX_URL)
+    if html is None:
+        print("⚠️  Не удалось загрузить каталог shirtv.uz ни напрямую, ни через туннель.")
         return set()
 
-    playlists = parse_playlists_html(resp.text, SHIRTV_BASE_URL)
+    playlists = parse_playlists_html(html, SHIRTV_BASE_URL)
     if not playlists:
         print("⚠️  На странице каталога ссылок на .m3u не найдено.")
         return set()
 
     # Исключаем саму страницу каталога и служебные ссылки
-    urls = {u for u in playlists if "playlists.html" not in u.lower()}
+    urls = {u for u, info in playlists.items() if "playlists.html" not in u.lower()}
 
     if SHIRTV_MARKED_ONLY:
         # берём только плейлисты со статусом свежести ("Свежий"/"Недавнее")
-        fresh = set()
-        for m in re.finditer(r'last-update-badge[^>]*update-(recent|fresh)[^"]*"', resp.text):
-            block = resp.text[m.start():m.start() + 4000]
-            um = re.search(r'data-url="([^"]+\.m3u8?)"', block) or \
-                 re.search(r'href="([^"]+\.m3u8?)"', block)
-            if um:
-                u = um.group(1)
-                if not u.startswith("http"):
-                    u = SHIRTV_BASE_URL + u.lstrip("/")
-                fresh.add(u)
+        fresh = {u for u, info in playlists.items() if info.get("fresh")}
         if fresh:
             urls &= fresh
+        else:
+            print("   ⚠️  Бейджи свежести не распознаны — беру все найденные плейлисты.")
 
     urls = {u.replace("http://", "https://", 1) if u.startswith("http://shirtv.uz") else u
             for u in urls}
