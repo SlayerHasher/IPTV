@@ -467,10 +467,10 @@ const isExcluded=u=>state.edits.excluded.includes(u);
 /* Каналы-заглушки «нужна подписка» (совпадает с SUBSCRIPTION_PATTERNS в parser.py) */
 const SUBS_RE=/нужна\s+подписка|необходима\s+подписка|требуется\s+подписка|нет\s+подписки|без\s+подписки|подключите\s+подписку|оформите\s+подписку|приобретите\s+подписку|купить\s+подписк|для\s+просмотра\s+нужна|доступ\s+по\s+подписке|подписка\s+(?:не\s+)?(?:истекла|закончилась|окончена)|trial\s+(?:version|channel|only)|subscription\s+(?:required|needed|only|expired)|requires?\s+(?:a\s+)?subscription|subscribe\s+to\s+watch|no\s+subscription|premium\s+(?:only|required|channel)|paid\s+(?:channel|access)/i;
 const isSubsRec=r=>SUBS_RE.test(r.name||"")||SUBS_RE.test(r.url||"");
-/* Живая проверка потока: у канала с «чистым» именем заглушка «нужна подписка»
-   видна только при открытии потока (сервер отдаёт HTML-страницу или 402/403).
-   В дашборде такие ссылки помечаются вручную чекбоксом «💳 в потоке заглушка»
-   (сохраняется в localStorage) либо массово через выделение → «Пометить 💳». */
+/* Автоматическая проверка потоков в CI намеренно отключена (слишком дорогая).
+   Если при открытии потока вместо трансляции показывается заставка «нужна
+   подписка» — пометьте ссылку вручную кнопкой 💳 (или массово: выделение →
+   «Пометить 💳»), затем исключите её 🚫 — метки хранятся в localStorage. */
 const SUBS_MARK_KEY='subsManualMarks';
 const getSubsMarks=()=>{try{return JSON.parse(localStorage.getItem(SUBS_MARK_KEY)||'{}')}catch(e){return{}}};
 const setSubsMark=(id,v)=>{const m=getSubsMarks();v?m[id]=1:delete m[id];localStorage.setItem(SUBS_MARK_KEY,JSON.stringify(m))};
@@ -731,7 +731,9 @@ function toggleSubsMark(idOrUrl){
   const r=dbRecords().find(x=>x.id===idOrUrl||x.url===idOrUrl); if(!r)return;
   const key=r.id||r.url, was=!!getSubsMarks()[key];
   setSubsMark(key,!was);
-  toast(was?"Метка «подписка в потоке» снята":"Помечено: вместо потока — страница «нужна подписка». Нажмите 🚫 чтобы исключить.","ok");
+  if(!was)toggleExclude(r.url);   // пометили заглушку → сразу исключаем из плейлистов
+  else if(state.edits.excluded.includes(r.url))toggleExclude(r.url); // сняли метку → возвращаем
+  toast(was?"Метка «подписка в потоке» снята, канал возвращён в плейлисты":"Помечено: вместо потока — заглушка «нужна подписка». Канал исключён из плейлистов.","ok");
   renderStreams();renderPlaylists();
 }
 function renderStreams(){
