@@ -357,6 +357,12 @@ details.srcitem summary::-webkit-details-marker{display:none}
     </div>
   </div>
   <div class="panel">
+    <h2>🌐 Внешние хабы (shirtv.uz)</h2>
+    <p class="hint">Плейлисты-источники, автоматически найденные парсером на каталоге <span class="mono">shirtv.uz/playlists.html</span>. Отмеченные исключаются из следующей генерации.</p>
+    <div class="rowlist"><input type="text" id="srcShirtvFilter" placeholder="🔍 фильтр по названию плейлиста…" oninput="renderSources()" style="cursor:text"></div>
+    <div id="srcShirtvList" style="max-height:340px;overflow:auto"></div>
+  </div>
+  <div class="panel">
     <h2>Предпросмотр play.list</h2>
     <textarea class="code" id="srcPreview" rows="14" readonly></textarea>
     <div class="toolbar" style="margin-top:10px">
@@ -448,7 +454,7 @@ details.srcitem summary::-webkit-details-marker{display:none}
 /* ================= СОСТОЯНИЕ ================= */
 const state = {
   db:null, fullM3u:"", stableM3u:"", sourcesText:"",
-  parsed:{manual:[],auto:[],excluded:[],comments:""},
+  parsed:{manual:[],auto:[],shirtv:[],excluded:[],comments:""},
   customM3u:null,
   edits:JSON.parse(localStorage.getItem("iptv-edits")||'{"excluded":[]}'),
   stSort:{key:"lifespan",asc:false}, stPageNum:0, histRec:null,
@@ -577,21 +583,24 @@ const histLen=r=>(r.histories||[]).length;
 
 /* ================= PLAY.LIST ================= */
 function parsePlayList(txt){
-  const p={manual:[],auto:[],excluded:[],comments:[]};let section="manual";
+  const p={manual:[],auto:[],shirtv:[],excluded:[],comments:[]};let section="manual";
   txt.split(/\r?\n/).forEach(line=>{
     const t=line.trim();
+    if(/AUTO SOURCES \(GitHub/i.test(t)){section="auto";return;}
+    if(/AUTO SOURCES \(shirtv/i.test(t)){section="shirtv";return;}
     if(/^#\s*(AUTO|AUTO SOURCES)/i.test(t)){section="auto";return;}
     if(/EXCLUDED/i.test(t)&&t.startsWith("#")){section="excluded";return;}
-    if(t.startsWith("http")){(section==="auto"?p.auto:section==="excluded"?p.excluded:p.manual).push(t);return;}
+    if(t.startsWith("http")){(section==="auto"?p.auto:section==="shirtv"?p.shirtv:section==="excluded"?p.excluded:p.manual).push(t);return;}
     if(t.startsWith("#")&&!t.startsWith("#EXT"))p.comments.push(t);
   });
-  state.parsed={manual:p.manual,auto:p.auto,excluded:p.excluded,comments:p.comments.join("\n")};
+  state.parsed={manual:p.manual,auto:p.auto,shirtv:p.shirtv,excluded:p.excluded,comments:p.comments.join("\n")};
 }
 function buildPlayList(){
   const p=state.parsed;
   let out=(p.comments||"# Это список источников IPTV.\n# Строки, начинающиеся с #, игнорируются скриптом.")+"\n\n";
   out+="# --- ВАШИ РУЧНЫЕ ИСТОЧНИКИ ---\n"+p.manual.join("\n")+"\n\n";
   out+="# --- AUTO SOURCES (GitHub Search) ---\n"+p.auto.join("\n")+"\n";
+  out+="\n# --- AUTO SOURCES (shirtv.uz) ---\n"+(p.shirtv||[]).join("\n")+"\n";
   if(p.excluded.length)out+="\n# --- EXCLUDED (ручное исключение dashboard-ом) ---\n"+p.excluded.map(u=>"# "+u).join("\n")+"\n";
   return out;
 }
@@ -809,9 +818,13 @@ function renderSources(){
   const mkRow=(u,i,arr)=>`<div class="rowlist"><input type="text" value="${esc(u)}" onchange="state.parsed.${arr}[${i}]=this.value;refreshSrcPreview()"><button class="rm" onclick="state.parsed.${arr}.splice(${i},1);renderSources()">✕</button></div>`;
   $("srcManual").innerHTML=p.manual.map((u,i)=>mkRow(u,i,"manual")).join("")||'<p class="hint">Список пуст</p>';
   const af=($("srcAutoFilter").value||"").toLowerCase();
-  $("srcAutoList").innerHTML=p.auto.filter(u=>!af||u.toLowerCase().includes(af)).map(u=>`<label class="rowlist" style="margin:0">
-      <input type="checkbox" ${p.excluded.includes(u)?"checked":""} onchange="toggleAutoExcl('${esc(u)}',this.checked)">
-      <span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</span></label>`).join("")||'<p class="hint">Авто-источники появятся после первого запуска workflow</p>';
+  const exclSet=new Set(p.excluded);
+  const exclHtml=(arr,filterVal,arrName)=>arr.filter(u=>!filterVal||u.toLowerCase().includes(filterVal)).map(u=>`<label class="rowlist" style="margin:0">
+      <input type="checkbox" ${exclSet.has(u)?"checked":""} onchange="toggleAutoExcl('${esc(u)}',this.checked)">
+      <span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</span></label>`).join("");
+  $("srcAutoList").innerHTML=exclHtml(p.auto,af)||'<p class="hint">Авто-источники появятся после первого запуска workflow</p>';
+  const sf=typeof $("srcShirtvFilter")!=="undefined"?($("srcShirtvFilter").value||"").toLowerCase():"";
+  $("srcShirtvList").innerHTML=exclHtml(p.shirtv||[],sf)||'<p class="hint">Источники shirtv.uz появятся после первого запуска workflow с парсером каталога</p>';
   refreshSrcPreview();
 }
 function toggleAutoExcl(u,chk){
