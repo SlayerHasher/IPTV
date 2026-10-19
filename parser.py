@@ -771,6 +771,9 @@ def main():
                             f"({best['name']}) |\n")
                 f.write(f"\nСтабильные ссылки: `{STABLE_PLAYLIST_FILE}` · "
                         f"Полная база: `{STABLE_DB_FILE}`\n")
+                f.write("\n🎛️ **Управление всеми списками** — интерактивный дашборд: "
+                        "<https://raw.githubusercontent.com/"
+                        f"{os.environ.get('GITHUB_REPOSITORY', 'OWNER/REPO')}/main/dashboard.html>`__\n")
         except OSError:
             pass
 

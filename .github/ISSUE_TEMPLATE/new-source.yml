@@ -1,0 +1,30 @@
+name: 🌱 Новый источник
+description: Проверенный .m3u-плейлист с русскоязычными каналами для добавления в play.list
+title: "[source]: "
+labels: ["sources"]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: URL источника
+      description: Прямая ссылка на .m3u (raw.githubusercontent.com или аналог)
+      placeholder: https://raw.githubusercontent.com/user/repo/main/playlist.m3u
+    validations:
+      required: true
+  - type: textarea
+    id: about
+    attributes:
+      label: О источнике
+      description: Сколько каналов, тематика, как давно существует, есть ли стабильные ссылки
+    validations:
+      required: true
+  - type: dropdown
+    id: quality
+    attributes:
+      label: Качество каналов
+      options:
+        - Много рабочих HD-трансляций
+        - Среднее (часть работает)
+        - Не проверял подробно
+    validations:
+      required: true

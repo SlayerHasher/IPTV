@@ -36,3 +36,13 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add play.list playlist.m3u stable_streams.json stable.m3u dashboard.html
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore: auto-update sources, playlist and stream lifetime stats" && git push)
+
+      - name: Update README channel counter badge
+        if: always()
+        run: |
+          N=$(grep -c '^#EXTINF' playlist.m3u || echo 0)
+          sed -i -E "s#(badge/каналов-)[0-9]+#\1${N}#" README.md
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --quiet && git diff --staged --quiet || (git commit -m "docs: update channel counter badge (${N})" && git push)
