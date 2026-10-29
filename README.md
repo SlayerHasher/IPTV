@@ -5,7 +5,7 @@
 <br/>
 
 [![Update Playlist](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/update-russian-iptv.yml?label=playlist%20update&logo=githubactions&logoColor=white&style=for-the-badge)](../../actions/workflows/update-russian-iptv.yml)
-[![Channels](https://img.shields.io/badge/каналов-8674-22d3ee?style=for-the-badge&logo=iplayerfm&logoColor=white)](playlist.m3u)
+[![Channels](https://img.shields.io/badge/каналов-8676-22d3ee?style=for-the-badge&logo=iplayerfm&logoColor=white)](playlist.m3u)
 [![Categories](https://img.shields.io/badge/категорий-16-a78bfa?style=for-the-badge)](#-категории-плейлиста)
 [![License](https://img.shields.io/badge/license-MIT-f59e0b?style=for-the-badge)](LICENSE)
 [![Dashboard](https://img.shields.io/badge/🎛️_Дашборд-управление-34d399?style=for-the-badge)](dashboard.html)
